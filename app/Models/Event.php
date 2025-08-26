@@ -2,23 +2,21 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Event extends Model
 {
-    use HasFactory;
-
-    protected $fillable = ['title','description','start','end','color','created_by','location','all_day'];
+    protected $fillable = [
+        'title', 'description', 'location', 'start', 'end', 'all_day', 'color', 'user_id'
+    ];
 
     protected $casts = [
-        'start'   => 'datetime',
-        'end'     => 'datetime',
+        'start' => 'datetime',
+        'end'   => 'datetime',
         'all_day' => 'boolean',
     ];
 
-    public function author()
-    {
-        return $this->belongsTo(\App\Models\User::class, 'created_by');
+    public function user() {
+        return $this->belongsTo(User::class);
     }
 }

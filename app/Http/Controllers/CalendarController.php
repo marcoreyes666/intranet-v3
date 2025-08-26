@@ -3,12 +3,24 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Carbon;
 use App\Models\Event;
 
 class CalendarController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware(['auth']);
+    }
+
+    public function index()
+    {
+        // ← IMPORTANTE: usa hasAnyRole para arrays
+        $canManage = auth()->user()->hasAnyRole(['Administrador', 'Encargado de departamento', 'Rector']);
+        return view('calendar.index', compact('canManage'));
+    }
+
+    // FullCalendar solicita eventos por rango
     public function fetch(Request $request)
     {
         $startQ = $request->query('start');
@@ -19,6 +31,7 @@ class CalendarController extends Controller
 
         $events = Event::query()
             ->when($start && $end, function ($q) use ($start, $end) {
+                // eventos que se traslapan con el rango solicitado
                 $q->where('start', '<', $end)
                   ->where(function ($w) use ($start) {
                       $w->whereNull('end')->orWhere('end', '>', $start);
@@ -33,10 +46,9 @@ class CalendarController extends Controller
                     'end'    => optional($e->end)->toIso8601String(),
                     'allDay' => (bool)$e->all_day,
                     'color'  => $e->color,
-                    'extendedProps' => [
-                        'location'    => $e->location,
-                        'description' => $e->description,
-                    ],
+                    // extendedProps
+                    'description' => $e->description,
+                    'location'    => $e->location,
                 ];
             });
 
@@ -45,29 +57,56 @@ class CalendarController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorizeManage();
+
         $data = $request->validate([
-            'title'       => ['required','string','max:255'],
-            'description' => ['nullable','string','max:2000'],
-            'location'    => ['nullable','string','max:255'],
-            'all_day'     => ['required','boolean'],
-            'start'       => ['required','date'],
-            'end'         => ['required','date','after_or_equal:start'],
-            'color'       => ['nullable','string','max:20'],
+            'title'       => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'location'    => 'nullable|string|max:255',
+            'start'       => 'required|date',
+            'end'         => 'nullable|date|after_or_equal:start',
+            'all_day'     => 'sometimes|boolean',
+            'color'       => 'nullable|string|max:20',
         ]);
 
-        $data['created_by'] = Auth::id();
-
-        if ($data['all_day']) {
-            $s = Carbon::parse($data['start'])->startOfDay();
-            $e = Carbon::parse($data['end'])->startOfDay();
-            if ($e->equalTo($s)) { 
-                $e = $s->copy()->addDay(); 
-            }
-            $data['start'] = $s;
-            $data['end']   = $e;
-        }
-
+        $data['user_id'] = $request->user()->id;
         $event = Event::create($data);
-        return response()->json($event, 201);
+
+        return response()->json(['ok' => true, 'id' => $event->id]);
+    }
+
+    public function update(Request $request, Event $event)
+    {
+        $this->authorizeManage();
+
+        $data = $request->validate([
+            'title'       => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'location'    => 'nullable|string|max:255',
+            'start'       => 'required|date',
+            'end'         => 'nullable|date|after_or_equal:start',
+            'all_day'     => 'sometimes|boolean',
+            'color'       => 'nullable|string|max:20',
+        ]);
+
+        $event->update($data);
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function destroy(Event $event)
+    {
+        $this->authorizeManage();
+
+        $event->delete();
+        return response()->json(['ok' => true]);
+    }
+
+    private function authorizeManage(): void
+    {
+        // ← IMPORTANTE: usa hasAnyRole para arrays
+        if (!auth()->user()->hasAnyRole(['Administrador','Encargado de departamento','Rector'])) {
+            abort(403, 'No autorizado');
+        }
     }
 }
