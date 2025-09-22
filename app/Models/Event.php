@@ -7,16 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 class Event extends Model
 {
     protected $fillable = [
-        'title', 'description', 'location', 'start', 'end', 'all_day', 'color', 'user_id'
+        'title','description','start','end','all_day','location',
     ];
 
     protected $casts = [
-        'start' => 'datetime',
-        'end'   => 'datetime',
+        'start'   => 'datetime',
+        'end'     => 'datetime',
         'all_day' => 'boolean',
     ];
-
-    public function user() {
-        return $this->belongsTo(User::class);
-    }
 }

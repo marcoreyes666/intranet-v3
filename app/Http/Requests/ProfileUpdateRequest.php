@@ -2,29 +2,29 @@
 
 namespace App\Http\Requests;
 
-use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class ProfileUpdateRequest extends FormRequest
 {
-    /**
-     * Get the validation rules that apply to the request.
-     *
-     * @return array<string, \Illuminate\Contracts\Validation\ValidationRule|array<mixed>|string>
-     */
+    public function authorize(): bool
+    {
+        // El usuario autenticado puede editar su propio perfil
+        return true;
+    }
+
     public function rules(): array
     {
+        $userId = $this->user()->id;
+
         return [
-            'name' => ['required', 'string', 'max:255'],
-            'email' => [
-                'required',
-                'string',
-                'lowercase',
-                'email',
-                'max:255',
-                Rule::unique(User::class)->ignore($this->user()->id),
+            'name'       => ['required','string','max:255'],
+            'email'      => [
+                'required','string','email','max:255',
+                Rule::unique('users','email')->ignore($userId),
             ],
+            'birth_date' => ['nullable','date','before:today'],
+            // agrega aquí otros campos de perfil si los usas (phone, position, etc.)
         ];
     }
 }

@@ -1,194 +1,194 @@
 <x-app-layout>
     <x-slot name="header">
-        <h1 class="text-xl font-bold">Detalle de la solicitud</h1>
+        <div class="flex items-center justify-between">
+            <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
+                Solicitud #{{ $requestForm->id }} — {{ ucfirst($requestForm->type) }}
+            </h2>
+            <div class="flex gap-2">
+                <a href="{{ route('requests.index') }}" class="btn btn-secondary">Volver</a>
+                <a href="{{ request()->fullUrlWithQuery(['export'=>'pdf']) }}" class="btn btn-outline">Exportar PDF</a>
+            </div>
+        </div>
     </x-slot>
 
-    @extends('layouts.app')
-
-    @section('content')
-        <div class="p-6 max-w-5xl mx-auto space-y-6">
-            {{-- Flash messages (opcional) --}}
-            @if(session('ok'))
-                <div class="rounded border border-green-200 bg-green-50 text-green-800 px-4 py-3">
-                    {{ session('ok') }}
-                </div>
-            @endif
-            @if($errors->any())
-                <div class="rounded border border-red-200 bg-red-50 text-red-800 px-4 py-3">
-                    <ul class="list-disc pl-5">
-                        @foreach($errors->all() as $e)
-                            <li>{{ $e }}</li>
-                        @endforeach
-                    </ul>
-                </div>
-            @endif
-
-            {{-- Encabezado --}}
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <h1 class="text-2xl font-bold">Solicitud #{{ $rq->id }}</h1>
-                    <p class="text-sm text-gray-500">
-                        Tipo: <span class="capitalize">{{ $rq->type }}</span> ·
-                        Estado: <span class="font-medium">{{ str_replace('_', ' ', $rq->status) }}</span> ·
-                        Creada: {{ $rq->created_at->format('d/m/Y H:i') }}
-                    </p>
-                    <p class="text-sm text-gray-500">
-                        Solicitante: <span class="font-medium">{{ $rq->user->name ?? '—' }}</span>
-                        @if($rq->user && $rq->user->department)
-                            · Departamento: <span class="font-medium">{{ $rq->user->department->name }}</span>
-                        @endif
-                    </p>
+    <div class="grid grid-cols-12 gap-6">
+        {{-- Detalle --}}
+        <div class="col-span-12 lg:col-span-7">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded shadow space-y-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="text-sm">Estado:
+                        <span class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 capitalize">{{ $requestForm->status }}</span>
+                    </span>
+                    <span class="text-sm">Nivel actual: {{ $requestForm->current_level }}</span>
                 </div>
 
-                {{-- Descargar documento si ya existe --}}
-                <div class="shrink-0">
-                    @if($rq->documents && $rq->documents->count())
-                        <a href="{{ route('requests.document', $rq) }}"
-                            class="inline-flex items-center gap-2 rounded bg-primary text-white px-4 py-2 hover:opacity-90">
-                            <i data-lucide="download" class="w-4 h-4"></i> Descargar documento
-                        </a>
-                    @else
-                        <span class="inline-flex items-center gap-2 rounded border px-4 py-2 text-gray-500">
-                            <i data-lucide="file" class="w-4 h-4"></i> Documento no disponible
-                        </span>
-                    @endif
-                </div>
-            </div>
-
-            {{-- Datos capturados (payload) --}}
-            <div class="rounded border bg-white dark:bg-gray-900 dark:border-gray-700">
-                <div class="px-4 py-3 border-b dark:border-gray-700 font-semibold">Datos de la solicitud</div>
-                <div class="p-4 overflow-x-auto">
-                    @php
-                        $pairs = collect($rq->payload ?? [])->map(function ($v, $k) {
-                            // Mejorar legibilidad de la clave
-                            $label = ucwords(str_replace(['_', '-'], ' ', $k));
-                            // Formateos básicos
-                            if (is_bool($v))
-                                $v = $v ? 'Sí' : 'No';
-                            if (is_array($v))
-                                $v = json_encode($v, JSON_UNESCAPED_UNICODE);
-                            return ['k' => $label, 'v' => $v];
-                        });
-                    @endphp
-                    @if($pairs->isEmpty())
-                        <div class="text-sm text-gray-500">Sin datos capturados.</div>
-                    @else
-                        <table class="min-w-full text-sm">
-                            <tbody class="divide-y dark:divide-gray-700">
-                                @foreach($pairs as $row)
-                                    <tr>
-                                        <td class="px-3 py-2 font-medium w-1/3">{{ $row['k'] }}</td>
-                                        <td class="px-3 py-2">{{ $row['v'] }}</td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
-                        </table>
-                    @endif
-                </div>
-            </div>
-
-            {{-- Línea de aprobaciones --}}
-            <div class="rounded border bg-white dark:bg-gray-900 dark:border-gray-700">
-                <div class="px-4 py-3 border-b dark:border-gray-700 font-semibold">Aprobaciones</div>
-                <div class="p-4">
-                    @if(!$rq->approvals || $rq->approvals->isEmpty())
-                        <div class="text-sm text-gray-500">Aún no hay pasos de aprobación creados.</div>
-                    @else
-                        <ol class="space-y-3">
-                            @foreach($rq->approvals as $ap)
-                                @php
-                                    $badgeClasses = match ($ap->decision) {
-                                        'aprobado' => 'bg-green-100 text-green-800 border-green-200',
-                                        'rechazado' => 'bg-red-100 text-red-800 border-red-200',
-                                        default => 'bg-yellow-50 text-yellow-800 border-yellow-200',
-                                    };
-                                    $stepLabel = ucfirst($ap->step); // encargado, contabilidad, compras, rectoria
-                                @endphp
-                                <li class="rounded border px-3 py-2 {{ $badgeClasses }}">
-                                    <div class="flex justify-between items-center">
-                                        <div class="font-medium">
-                                            Paso: {{ $stepLabel }}
-                                            @if($ap->approver)
-                                                · Aprobador: {{ $ap->approver->name }}
-                                            @endif
-                                        </div>
-                                        <div class="text-sm">
-                                            Estado: <strong>{{ ucfirst($ap->decision) }}</strong>
-                                            @if($ap->decided_at)
-                                                · {{ \Illuminate\Support\Carbon::parse($ap->decided_at)->format('d/m/Y H:i') }}
-                                            @endif
-                                        </div>
-                                    </div>
-                                    @if($ap->comments)
-                                        <div class="mt-1 text-sm text-gray-700 dark:text-gray-300">
-                                            Comentarios: “{{ $ap->comments }}”
-                                        </div>
-                                    @endif
-                                </li>
-                            @endforeach
-                        </ol>
-                    @endif
-                </div>
-            </div>
-
-            {{-- Bloque de acción: Aprobar / Rechazar (solo si tengo un paso pendiente) --}}
-            @php
-                $myPending = $rq->approvals
-                    ->where('approver_id', auth()->id())
-                    ->where('decision', 'pendiente')
-                    ->first();
-            @endphp
-
-            @if($myPending)
-                <div class="rounded border bg-white dark:bg-gray-900 dark:border-gray-700">
-                    <div class="px-4 py-3 border-b dark:border-gray-700 font-semibold">
-                        Tu decisión (Paso: {{ ucfirst($myPending->step) }})
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <div class="text-xs text-slate-500">Solicitante</div>
+                        <div>{{ $requestForm->user->name ?? '—' }}</div>
                     </div>
-                    <div class="p-4">
-                        <form method="POST" action="{{ route('requests.approve', $rq) }}" class="space-y-4">
-                            @csrf
-                            <label class="block text-sm font-medium">Comentarios (opcional)</label>
-                            <textarea name="comments" rows="3" class="w-full border rounded px-3 py-2"
-                                placeholder="Agregar un comentario para el solicitante..."></textarea>
+                    <div>
+                        <div class="text-xs text-slate-500">Departamento</div>
+                        <div>{{ $requestForm->department->name ?? '—' }}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-slate-500">Creada</div>
+                        <div>{{ $requestForm->created_at?->format('d/m/Y H:i') }}</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-slate-500">Enviada a revisión</div>
+                        <div>{{ $requestForm->submitted_at?->format('d/m/Y H:i') ?? '—' }}</div>
+                    </div>
+                </div>
 
-                            <div class="flex items-center gap-3">
-                                <button type="submit"
-                                    class="inline-flex items-center gap-2 rounded bg-green-600 text-white px-4 py-2 hover:bg-green-700">
-                                    <i data-lucide="check" class="w-4 h-4"></i> Aprobar
-                                </button>
-
-                                {{-- Rechazar: envío a otra ruta --}}
-                                <button type="button" onclick="document.getElementById('reject-form').submit()"
-                                    class="inline-flex items-center gap-2 rounded bg-red-600 text-white px-4 py-2 hover:bg-red-700">
-                                    <i data-lucide="x" class="w-4 h-4"></i> Rechazar
-                                </button>
+                {{-- Detalle por tipo --}}
+                @if($requestForm->type === 'permiso' && $requestForm->permiso)
+                    <div class="border-t pt-4">
+                        <h3 class="font-medium mb-2">Detalle del permiso</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-xs text-slate-500">Fecha</div>
+                                <div>{{ $requestForm->permiso->date?->format('d/m/Y') }}</div>
                             </div>
-                        </form>
-
-                        <form id="reject-form" method="POST" action="{{ route('requests.reject', $rq) }}" class="hidden">
-                            @csrf
-                            <input type="hidden" name="comments" value="" onfocus="/* placeholder para mantener estructura */">
-                        </form>
+                            <div>
+                                <div class="text-xs text-slate-500">Motivo</div>
+                                <div>{{ $requestForm->permiso->reason ?? '—' }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500">Salida</div>
+                                <div>{{ $requestForm->permiso->start_time?->format('H:i') ?? '—' }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500">Regreso</div>
+                                <div>{{ $requestForm->permiso->end_time?->format('H:i') ?? '—' }}</div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            @endif
+                @endif
+
+                @if($requestForm->type === 'cheque' && $requestForm->cheque)
+                    <div class="border-t pt-4">
+                        <h3 class="font-medium mb-2">Detalle del cheque</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-xs text-slate-500">A favor de</div>
+                                <div>{{ $requestForm->cheque->pay_to }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500">Moneda</div>
+                                <div>{{ $requestForm->cheque->currency }}</div>
+                            </div>
+                            <div class="sm:col-span-2">
+                                <div class="text-xs text-slate-500">Concepto</div>
+                                <div>{{ $requestForm->cheque->concept }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs text-slate-500">Importe</div>
+                                <div>{{ number_format($requestForm->cheque->amount,2) }}</div>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+
+                @if($requestForm->type === 'compra' && $requestForm->compra)
+                    <div class="border-t pt-4 space-y-3">
+                        <h3 class="font-medium">Detalle de la compra</h3>
+                        <div>
+                            <div class="text-xs text-slate-500">Justificación</div>
+                            <div>{{ $requestForm->compra->justification }}</div>
+                        </div>
+                        @if($requestForm->compra->urls)
+                            <div>
+                                <div class="text-xs text-slate-500">URLs</div>
+                                <ul class="list-disc ml-6">
+                                    @foreach($requestForm->compra->urls as $u)
+                                        <li><a href="{{ $u }}" class="text-blue-600 underline" target="_blank">{{ $u }}</a></li>
+                                    @endforeach
+                                </ul>
+                            </div>
+                        @endif
+                        <div class="overflow-x-auto rounded border">
+                            <table class="min-w-full text-sm">
+                                <thead class="bg-gray-50 dark:bg-gray-700/50">
+                                    <tr><th class="px-3 py-2 text-left">Cantidad</th><th class="px-3 py-2 text-left">Unidad</th><th class="px-3 py-2 text-left">Descripción</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($requestForm->compra->items as $it)
+                                        <tr class="border-t">
+                                            <td class="px-3 py-2">{{ rtrim(rtrim(number_format($it->qty,2,'.',''), '0'),'.') }}</td>
+                                            <td class="px-3 py-2">{{ $it->unit }}</td>
+                                            <td class="px-3 py-2">{{ $it->description }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+
+                        @if($requestForm->status === 'completada')
+                            <div class="text-xs text-slate-600">
+                                Entregada el {{ $requestForm->compra->delivered_at?->format('d/m/Y H:i') }}
+                                por {{ $requestForm->compra->completedBy?->name }}
+                            </div>
+                        @endif
+                    </div>
+                @endif
+            </div>
         </div>
 
-        {{-- Sin JS de framework: rellena comentarios también al rechazar --}}
-        <script>
-            (function () {
-                const approveTextarea = document.querySelector('form[action*="approve"] textarea[name="comments"]');
-                const rejectForm = document.getElementById('reject-form');
-                if (approveTextarea && rejectForm) {
-                    const hiddenInput = rejectForm.querySelector('input[name="comments"]');
-                    // Sincroniza el comentario entre ambos formularios
-                    approveTextarea.addEventListener('input', () => {
-                        hiddenInput.value = approveTextarea.value;
-                    });
-                }
-            })();
-        </script>
-    @endsection
+        {{-- Flujo y acciones --}}
+        <div class="col-span-12 lg:col-span-5 space-y-6">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+                <h3 class="font-medium mb-3">Flujo de aprobación</h3>
+                <div class="space-y-3">
+                    @foreach($requestForm->approvals->sortBy('level') as $ap)
+                        <div class="flex items-start justify-between gap-2 border-b pb-2 last:border-b-0">
+                            <div>
+                                <div class="text-sm">Nivel {{ $ap->level }} — {{ $ap->role }}</div>
+                                <div class="text-xs text-slate-500">
+                                    Estado: <span class="capitalize">{{ $ap->state }}</span>
+                                    @if($ap->decided_at)
+                                        • {{ $ap->decided_at->format('d/m/Y H:i') }} por {{ $ap->decider?->name }}
+                                    @endif
+                                </div>
+                                @if($ap->comment)
+                                    <div class="text-xs text-slate-600 mt-1">“{{ $ap->comment }}”</div>
+                                @endif
+                            </div>
+                            <span class="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 capitalize">{{ $ap->state }}</span>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
 
+            @can('approve', $requestForm)
+            @if($requestForm->status === 'en_revision')
+            <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+                <h3 class="font-medium mb-3">Decisión</h3>
+                <form method="POST" action="{{ route('requests.approve',$requestForm) }}" class="space-y-3">
+                    @csrf
+                    <textarea name="comment" class="form-textarea w-full" rows="2" placeholder="Comentario (opcional)"></textarea>
+                    <button class="btn btn-success w-full">Aprobar</button>
+                </form>
+                <form method="POST" action="{{ route('requests.reject',$requestForm) }}" class="space-y-3 mt-3">
+                    @csrf
+                    <textarea name="comment" class="form-textarea w-full" rows="2" placeholder="Motivo de rechazo"></textarea>
+                    <button class="btn btn-danger w-full">Rechazar</button>
+                </form>
+            </div>
+            @endif
+            @endcan
+
+            @can('complete', $requestForm)
+            @if($requestForm->type === 'compra' && $requestForm->status === 'aprobada')
+            <div class="bg-white dark:bg-gray-800 p-6 rounded shadow">
+                <h3 class="font-medium mb-3">Finalizar compra</h3>
+                <form method="POST" action="{{ route('requests.complete',$requestForm) }}">
+                    @csrf
+                    <button class="btn btn-primary w-full">Marcar como Completada</button>
+                </form>
+            </div>
+            @endif
+            @endcan
+        </div>
+    </div>
 </x-app-layout>

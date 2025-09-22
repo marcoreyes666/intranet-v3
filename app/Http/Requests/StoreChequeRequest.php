@@ -1,21 +1,17 @@
 <?php
 
+// app/Http/Requests/StoreChequeRequest.php
 namespace App\Http\Requests;
-
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Facades\Auth;
 
-class StoreChequeRequest extends FormRequest
-{
-    public function authorize(): bool { return Auth::check(); }
-
+class StoreChequeRequest extends FormRequest {
+    public function authorize(): bool { return $this->user()->can('create', \App\Models\RequestForm::class); }
     public function rules(): array {
         return [
-            'solicitante'  => 'required|string|max:255',
-            'departamento' => 'required|string|max:255',
-            'fecha'        => 'required|date',
-            'concepto'     => 'required|string|max:500',
-            'monto'        => 'required|numeric|min:0',
+            'pay_to'   => ['required','string','max:150'],
+            'concept'  => ['required','string'],
+            'currency' => ['required','in:MXN,USD'],
+            'amount'   => ['required','numeric','min:0.01'],
         ];
     }
 }

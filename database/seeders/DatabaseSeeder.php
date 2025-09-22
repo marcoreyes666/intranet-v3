@@ -9,10 +9,11 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            DepartmentsSeeder::class,
+            ConsolidatedAccessSeeder::class,
             RolesSeeder::class,
-            DepartmentSeeder::class,
-            RolesExtraSeeder::class,
-            AdminUserSeeder::class,
+            RolesExtraSeeder::class,   // ya crea Compras/Contabilidad
+            ApproverUsersSeeder::class,
         ]);
     }
 }

@@ -1,112 +1,196 @@
-// resources/js/app.js
+// resources/js/calendar.js
+import { Calendar } from '@fullcalendar/core';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import timeGridPlugin from '@fullcalendar/timegrid';
 
-// ...tu resto de imports/JS de la app (Breeze/Alpine/etc.)...
+if (!window.__calendarInit) {
+  window.__calendarInit = true;
 
-document.addEventListener('DOMContentLoaded', async () => {
-  const el = document.getElementById('calendar');
+  document.addEventListener('DOMContentLoaded', () => {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
-  // Si el calendario NO marca data-use-vite="1", NO lo inicializamos desde Vite
-  if (!el || el.getAttribute('data-use-vite') !== '1') {
-    return;
-  }
+    const elCalendar = document.getElementById('calendar');
+    if (!elCalendar) return;
 
-  // Dynamic imports (válidos dentro de funciones con Vite)
-  const [{ Calendar }, dayGrid, interaction, timeGrid, list] = await Promise.all([
-    import('@fullcalendar/core'),
-    import('@fullcalendar/daygrid'),
-    import('@fullcalendar/interaction'),
-    import('@fullcalendar/timegrid'),
-    import('@fullcalendar/list'),
-  ]);
+    // Flag informativo (la visibilidad del botón la controla Blade)
+    const canManage = elCalendar.dataset.canManage === '1';
 
-  const canEdit = el.dataset.canEdit === '1';
+    // Modales y campos
+    const modalForm    = document.getElementById('eventFormModal');
+    const modalView    = document.getElementById('eventViewModal');
 
-  const calendar = new Calendar(el, {
-    plugins: [dayGrid.default, interaction.default, timeGrid.default, list.default],
-    initialView: 'dayGridMonth',
-    headerToolbar: {
-      left: 'prev,next today',
-      center: 'title',
-      right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
-    },
-    locale: 'es',
-    events: '/calendar/events',
-    selectable: false,     // crear por selección desactivado
-    editable: canEdit,     // drag/resize solo para roles con permiso
-    eventClick: (info) => {
-      if (!canEdit) return; // este flujo abre tu modal propio solo si eres editor
-      const evt = {
-        id: info.event.id,
-        title: info.event.title,
-        start: info.event.start?.toISOString(),
-        end: info.event.end?.toISOString(),
-        allDay: !!info.event.allDay,
-        extendedProps: info.event.extendedProps || {}
-      };
-      // Si usas un modal propio fuera de Vite, podrías emitir un evento global:
-      window.dispatchEvent(new CustomEvent('calendar_open', {
-        detail: { mode: 'edit', event: evt }
-      }));
-    },
-    eventDrop: async (info) => {
-      if (!canEdit) return;
-      await fetch(`/calendar/events/${info.event.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
-        },
-        body: JSON.stringify({
-          start: info.event.start?.toISOString(),
-          end: info.event.end?.toISOString(),
-        })
-      });
-    },
-    eventResize: async (info) => {
-      if (!canEdit) return;
-      await fetch(`/calendar/events/${info.event.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token)').content
-        },
-        body: JSON.stringify({
-          start: info.event.start?.toISOString(),
-          end: info.event.end?.toISOString(),
-        })
-      });
-    },
-    eventContent: (arg) => {
-      const wrap = document.createElement('div');
-      const title = document.createElement('div');
-      title.innerText = arg.event.title;
-      wrap.appendChild(title);
+    const eventId      = document.getElementById('eventId');
+    const title        = document.getElementById('title');
+    const description  = document.getElementById('description');
+    const start        = document.getElementById('start');
+    const end          = document.getElementById('end');
+    const all_day      = document.getElementById('all_day');
+    const locationInput= document.getElementById('location');
 
-      const location = arg.event.extendedProps?.location;
-      if (location) {
-        const loc = document.createElement('div');
-        loc.style.fontSize = '0.75rem';
-        loc.style.opacity = '0.8';
-        loc.innerText = location;
-        wrap.appendChild(loc);
-      }
-      return { domNodes: [wrap] };
-    }
-  });
+    const eventDetails = document.getElementById('eventDetails');
+    const btnCancelForm= document.getElementById('btnCancelForm');
+    const btnSaveForm  = document.getElementById('btnSaveForm');
+    const btnCloseView = document.getElementById('btnCloseView');
+    const btnEdit      = document.getElementById('btnEdit');
+    const btnDelete    = document.getElementById('btnDelete');
+    const btnNewEvent  = document.getElementById('btnNewEvent');
 
-  // Botón opcional para abrir crear (si existe en tu HTML)
-  const btn = document.getElementById('btn-open-create');
-  if (btn) {
-    btn.addEventListener('click', () => {
-      const today = new Date().toISOString().substring(0,10);
-      window.dispatchEvent(new CustomEvent('calendar_open', {
-        detail: { mode: 'create', presetDate: today }
-      }));
+    // Helpers UI
+    const open  = (el) => { el?.classList.remove('hidden'); el?.classList.add('flex'); };
+    const close = (el) => { el?.classList.add('hidden'); el?.classList.remove('flex'); };
+    const resetForm = () => {
+      if (!eventId) return;
+      eventId.value = '';
+      title.value = '';
+      description.value = '';
+      start.value = '';
+      end.value = '';
+      all_day.checked = false;
+      locationInput.value = '';
+    };
+    const setLocalDatetime = (input, dateObj) => {
+      const d = new Date(dateObj);
+      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+      input.value = d.toISOString().slice(0, 16);
+    };
+    const fmt = (d) => d ? new Date(d).toLocaleString() : '-';
+    const escapeHtml = (s) => (s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+    const nl2br = (s) => (s || '').replace(/\n/g, '<br>');
+
+    // Botón externo "Nuevo evento"
+    btnNewEvent?.addEventListener('click', () => {
+      resetForm();
+      setLocalDatetime(start, new Date());
+      document.getElementById('eventFormTitle').textContent = 'Nuevo evento';
+      open(modalForm);
     });
-  }
 
-  // Refetch cuando el modal guarda o elimina
-  window.addEventListener('calendar:refetch', () => calendar.refetchEvents());
+    // Calendario
+    const calendar = new Calendar(elCalendar, {
+      plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
+      initialView: 'dayGridMonth',
+      height: 'auto',
+      headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+      events: '/calendar/events',
+      selectable: false,
+      editable: false,
+      eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
 
-  calendar.render();
-});
+      // Clase especial para cumpleaños
+      eventClassNames: (arg) =>
+        arg.event.extendedProps?.type === 'birthday' ? ['fc-birthday'] : [],
+
+      // ÚNICO eventClick
+      eventClick: async (info) => {
+        const isBirthday = info.event.extendedProps?.type === 'birthday';
+
+        // Cumpleaños: solo mensaje, SIN modal ni botones
+        if (isBirthday) {
+          const name = info.event.extendedProps?.name
+            || info.event.title.replace(/^🎂 Cumple:\s*/, '');
+          alert(`🎉 ¡Felicidades a ${name}!`);
+          return;
+        }
+
+        // Evento normal: detalles en modal (con botones si Blade los renderizó)
+        if (btnEdit)   btnEdit.style.display = '';
+        if (btnDelete) btnDelete.style.display = '';
+
+        const id = info.event.id;
+        const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf } });
+        if (!res.ok) { alert('No se pudo cargar el evento'); return; }
+        const data = await res.json();
+
+        eventDetails.innerHTML = `
+          <div><strong>Título:</strong> ${escapeHtml(info.event.title)}</div>
+          <div><strong>Inicio:</strong> ${fmt(info.event.start)}</div>
+          <div><strong>Fin:</strong> ${info.event.end ? fmt(info.event.end) : '-'}</div>
+          <div><strong>Todo el día:</strong> ${info.event.allDay ? 'Sí' : 'No'}</div>
+          <div><strong>Lugar:</strong> ${escapeHtml(data.location || '-')}</div>
+          <div><strong>Descripción:</strong><br>${nl2br(escapeHtml(data.description || '-'))}</div>
+        `;
+        eventDetails.dataset.id = id;
+        open(modalView);
+      },
+    });
+
+    calendar.render();
+
+    // Crear / Editar (anti-doble submit)
+    let isSubmitting = false;
+    document.getElementById('eventForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (isSubmitting) return;
+      isSubmitting = true;
+      if (btnSaveForm) btnSaveForm.disabled = true;
+
+      try {
+        const id = eventId.value;
+        const payload = {
+          title: title.value,
+          description: description.value,
+          start: start.value,
+          end: end.value || null,
+          all_day: all_day.checked ? 1 : 0,
+          location: locationInput.value
+        };
+
+        const res = await fetch(id ? `/calendar/events/${id}` : '/calendar/events', {
+          method: id ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert('Error: ' + (err.message || 'Revisa los datos.'));
+          return;
+        }
+
+        close(modalForm);
+        calendar.refetchEvents();
+      } finally {
+        isSubmitting = false;
+        if (btnSaveForm) btnSaveForm.disabled = false;
+      }
+    });
+
+    // Editar desde modal de detalles
+    btnEdit?.addEventListener('click', async () => {
+      const id = eventDetails.dataset.id;
+      const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf } });
+      if (!res.ok) { alert('No se pudo cargar el evento'); return; }
+      const data = await res.json();
+
+      eventId.value = id;
+      title.value = data.title || '';
+      description.value = data.description || '';
+      start.value = data.start || '';
+      end.value = data.end || '';
+      all_day.checked = !!data.all_day;
+      locationInput.value = data.location || '';
+
+      close(modalView);
+      document.getElementById('eventFormTitle').textContent = 'Editar evento';
+      open(modalForm);
+    });
+
+    // Eliminar
+    btnDelete?.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este evento?')) return;
+      const id = eventDetails.dataset.id;
+      const res = await fetch(`/calendar/events/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' }
+      });
+      if (!res.ok) { alert('No se pudo eliminar'); return; }
+      close(modalView);
+      calendar.refetchEvents();
+    });
+
+    // Cerrar modales
+    btnCancelForm?.addEventListener('click', () => close(modalForm));
+    btnCloseView?.addEventListener('click', () => close(modalView));
+  });
+}

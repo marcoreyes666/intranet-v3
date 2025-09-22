@@ -17,6 +17,16 @@ class Ticket extends Model
         'resuelto_en' => 'datetime',
     ];
 
+    public function scopeVisibleTo($q, $u) {
+    if ($u->hasAnyRole(['Administrador','Rector'])) return $q;
+    if ($u->hasRole('Encargado de departamento')) {
+        return $q->where('departamento_id', $u->department_id);
+    }
+    return $q->where(function($w) use ($u) {
+        $w->where('usuario_id', $u->id)->orWhere('asignado_id', $u->id);
+    });
+}
+
     // Reportante
     public function usuario(): BelongsTo {
         return $this->belongsTo(User::class, 'usuario_id');
