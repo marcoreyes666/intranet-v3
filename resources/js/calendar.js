@@ -13,184 +13,208 @@ if (!window.__calendarInit) {
     const elCalendar = document.getElementById('calendar');
     if (!elCalendar) return;
 
-    // Flag informativo (la visibilidad del botón la controla Blade)
     const canManage = elCalendar.dataset.canManage === '1';
 
-    // Modales y campos
-    const modalForm    = document.getElementById('eventFormModal');
-    const modalView    = document.getElementById('eventViewModal');
+    // ------- Modales y formularios (IDs que SÍ existen en tu Blade) -------
+    const modalCreate = document.getElementById('modal-create');
+    const modalShow   = document.getElementById('modal-show');
 
-    const eventId      = document.getElementById('eventId');
-    const title        = document.getElementById('title');
-    const description  = document.getElementById('description');
-    const start        = document.getElementById('start');
-    const end          = document.getElementById('end');
-    const all_day      = document.getElementById('all_day');
-    const locationInput= document.getElementById('location');
+    const formCreate  = document.getElementById('form-create');
+    const formShow    = document.getElementById('form-show');
 
-    const eventDetails = document.getElementById('eventDetails');
-    const btnCancelForm= document.getElementById('btnCancelForm');
-    const btnSaveForm  = document.getElementById('btnSaveForm');
-    const btnCloseView = document.getElementById('btnCloseView');
-    const btnEdit      = document.getElementById('btnEdit');
-    const btnDelete    = document.getElementById('btnDelete');
-    const btnNewEvent  = document.getElementById('btnNewEvent');
+    // Campos de create
+    const cTitle      = formCreate?.elements['title'];
+    const cStart      = formCreate?.elements['start'];
+    const cEnd        = formCreate?.elements['end'];
+    const cAllDay     = formCreate?.elements['all_day'];
+    const cLocation   = formCreate?.elements['location'];
+    const cNotes      = formCreate?.elements['notes'];
 
-    // Helpers UI
-    const open  = (el) => { el?.classList.remove('hidden'); el?.classList.add('flex'); };
-    const close = (el) => { el?.classList.add('hidden'); el?.classList.remove('flex'); };
-    const resetForm = () => {
-      if (!eventId) return;
-      eventId.value = '';
-      title.value = '';
-      description.value = '';
-      start.value = '';
-      end.value = '';
-      all_day.checked = false;
-      locationInput.value = '';
-    };
-    const setLocalDatetime = (input, dateObj) => {
-      const d = new Date(dateObj);
+    // Campos de show/edit
+    const sId         = formShow?.elements['id'];
+    const sTitle      = formShow?.elements['title'];
+    const sStart      = formShow?.elements['start'];
+    const sEnd        = formShow?.elements['end'];
+    const sAllDay     = formShow?.elements['all_day'];
+    const sLocation   = formShow?.elements['location'];
+    const sNotes      = formShow?.elements['notes'];
+
+    const btnNewEvent   = document.getElementById('btn-new-event');
+    const btnEdit       = document.getElementById('btn-edit');
+    const btnDelete     = document.getElementById('btn-delete');
+    const btnCancelEdit = document.getElementById('btn-cancel-edit');
+    const btnSave       = document.getElementById('btn-save');
+
+    // ------- Helpers UI -------
+    const open  = (el) => { if (!el) return; el.classList.remove('hidden'); el.classList.add('flex'); };
+    const close = (el) => { if (!el) return; el.classList.add('hidden'); el.classList.remove('flex'); };
+
+    const toLocalInputValue = (value) => {
+      if (!value) return '';
+      const d = new Date(value);
       d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-      input.value = d.toISOString().slice(0, 16);
+      return d.toISOString().slice(0, 16);
     };
-    const fmt = (d) => d ? new Date(d).toLocaleString() : '-';
-    const escapeHtml = (s) => (s || '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
-    const nl2br = (s) => (s || '').replace(/\n/g, '<br>');
 
-    // Botón externo "Nuevo evento"
-    btnNewEvent?.addEventListener('click', () => {
-      resetForm();
-      setLocalDatetime(start, new Date());
-      document.getElementById('eventFormTitle').textContent = 'Nuevo evento';
-      open(modalForm);
-    });
+    const setDisabledShowForm = (disabled) => {
+      [sTitle, sStart, sEnd, sAllDay, sLocation, sNotes].forEach(inp => inp && (inp.disabled = disabled));
+      if (btnCancelEdit) btnCancelEdit.style.display = disabled ? 'none' : '';
+      if (btnSave)       btnSave.style.display       = disabled ? 'none' : '';
+    };
 
-    // Calendario
+    const resetCreateForm = () => {
+      if (!formCreate) return;
+      cTitle.value = '';
+      cStart.value = toLocalInputValue(new Date());
+      cEnd.value   = '';
+      cAllDay.checked = false;
+      cLocation.value = '';
+      cNotes.value    = '';
+    };
+
+    // ------- Botón "Nuevo evento" (coincide con id="btn-new-event") -------
+    if (btnNewEvent && canManage) {
+      btnNewEvent.addEventListener('click', () => {
+        resetCreateForm();
+        open(modalCreate);
+      });
+    }
+
+    // ------- FullCalendar -------
     const calendar = new Calendar(elCalendar, {
       plugins: [dayGridPlugin, timeGridPlugin, interactionPlugin],
       initialView: 'dayGridMonth',
       height: 'auto',
       headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
       events: '/calendar/events',
-      selectable: false,
       editable: false,
+      selectable: false,
       eventTimeFormat: { hour: '2-digit', minute: '2-digit', meridiem: false },
+      eventClassNames: (arg) => arg.event.extendedProps?.type === 'birthday' ? ['fc-birthday'] : [],
 
-      // Clase especial para cumpleaños
-      eventClassNames: (arg) =>
-        arg.event.extendedProps?.type === 'birthday' ? ['fc-birthday'] : [],
-
-      // ÚNICO eventClick
       eventClick: async (info) => {
         const isBirthday = info.event.extendedProps?.type === 'birthday';
-
-        // Cumpleaños: solo mensaje, SIN modal ni botones
         if (isBirthday) {
-          const name = info.event.extendedProps?.name
-            || info.event.title.replace(/^🎂 Cumple:\s*/, '');
+          const name = info.event.extendedProps?.name || info.event.title.replace(/^🎂\s*Cumpleaños:\s*/i, '');
           alert(`🎉 ¡Felicidades a ${name}!`);
           return;
         }
 
-        // Evento normal: detalles en modal (con botones si Blade los renderizó)
-        if (btnEdit)   btnEdit.style.display = '';
-        if (btnDelete) btnDelete.style.display = '';
-
-        const id = info.event.id;
-        const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf } });
+        // Cargar detalles reales desde backend
+        const id  = info.event.id;
+        const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' } });
         if (!res.ok) { alert('No se pudo cargar el evento'); return; }
-        const data = await res.json();
+        const payload = await res.json();
+        const data = payload.event || payload; // por si devuelves plano
 
-        eventDetails.innerHTML = `
-          <div><strong>Título:</strong> ${escapeHtml(info.event.title)}</div>
-          <div><strong>Inicio:</strong> ${fmt(info.event.start)}</div>
-          <div><strong>Fin:</strong> ${info.event.end ? fmt(info.event.end) : '-'}</div>
-          <div><strong>Todo el día:</strong> ${info.event.allDay ? 'Sí' : 'No'}</div>
-          <div><strong>Lugar:</strong> ${escapeHtml(data.location || '-')}</div>
-          <div><strong>Descripción:</strong><br>${nl2br(escapeHtml(data.description || '-'))}</div>
-        `;
-        eventDetails.dataset.id = id;
-        open(modalView);
+        if (sId)       sId.value       = data.id ?? '';
+        if (sTitle)    sTitle.value    = data.title ?? '';
+        if (sStart)    sStart.value    = toLocalInputValue(data.start);
+        if (sEnd)      sEnd.value      = toLocalInputValue(data.end);
+        if (sAllDay)   sAllDay.checked = !!data.all_day;
+        if (sLocation) sLocation.value = data.location ?? '';
+        if (sNotes)    sNotes.value    = data.notes ?? data.description ?? '';
+
+        // Mostrar en modo lectura
+        setDisabledShowForm(true);
+        open(modalShow);
       },
     });
 
     calendar.render();
 
-    // Crear / Editar (anti-doble submit)
-    let isSubmitting = false;
-    document.getElementById('eventForm')?.addEventListener('submit', async (e) => {
+    // ------- Crear (POST) -------
+    formCreate?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (isSubmitting) return;
-      isSubmitting = true;
-      if (btnSaveForm) btnSaveForm.disabled = true;
+      const body = {
+        title: cTitle.value,
+        start: cStart.value,
+        end:   cEnd.value || null,
+        all_day: cAllDay.checked ? 1 : 0,
+        location: cLocation.value || null,
+        notes: cNotes.value || null,
+      };
 
-      try {
-        const id = eventId.value;
-        const payload = {
-          title: title.value,
-          description: description.value,
-          start: start.value,
-          end: end.value || null,
-          all_day: all_day.checked ? 1 : 0,
-          location: locationInput.value
-        };
-
-        const res = await fetch(id ? `/calendar/events/${id}` : '/calendar/events', {
-          method: id ? 'PATCH' : 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert('Error: ' + (err.message || 'Revisa los datos.'));
-          return;
-        }
-
-        close(modalForm);
-        calendar.refetchEvents();
-      } finally {
-        isSubmitting = false;
-        if (btnSaveForm) btnSaveForm.disabled = false;
-      }
-    });
-
-    // Editar desde modal de detalles
-    btnEdit?.addEventListener('click', async () => {
-      const id = eventDetails.dataset.id;
-      const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf } });
-      if (!res.ok) { alert('No se pudo cargar el evento'); return; }
-      const data = await res.json();
-
-      eventId.value = id;
-      title.value = data.title || '';
-      description.value = data.description || '';
-      start.value = data.start || '';
-      end.value = data.end || '';
-      all_day.checked = !!data.all_day;
-      locationInput.value = data.location || '';
-
-      close(modalView);
-      document.getElementById('eventFormTitle').textContent = 'Editar evento';
-      open(modalForm);
-    });
-
-    // Eliminar
-    btnDelete?.addEventListener('click', async () => {
-      if (!confirm('¿Eliminar este evento?')) return;
-      const id = eventDetails.dataset.id;
-      const res = await fetch(`/calendar/events/${id}`, {
-        method: 'DELETE',
-        headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' }
+      const res = await fetch('/calendar/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+        body: JSON.stringify(body),
       });
-      if (!res.ok) { alert('No se pudo eliminar'); return; }
-      close(modalView);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert('Error al crear: ' + (err.message || 'verifica los datos.'));
+        return;
+      }
+      close(modalCreate);
       calendar.refetchEvents();
     });
 
-    // Cerrar modales
-    btnCancelForm?.addEventListener('click', () => close(modalForm));
-    btnCloseView?.addEventListener('click', () => close(modalView));
+    // ------- Editar (UI) -------
+    btnEdit?.addEventListener('click', () => {
+      if (!canManage) return;
+      setDisabledShowForm(false);
+    });
+
+    btnCancelEdit?.addEventListener('click', () => {
+      setDisabledShowForm(true);
+    });
+
+    // ------- Guardar cambios (PATCH) -------
+    formShow?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!canManage) return;
+      const id = sId.value;
+      if (!id) return;
+
+      const body = {
+        title: sTitle.value,
+        start: sStart.value,
+        end:   sEnd.value || null,
+        all_day: sAllDay.checked ? 1 : 0,
+        location: sLocation.value || null,
+        notes: sNotes.value || null,
+      };
+
+      const res = await fetch(`/calendar/events/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert('Error al actualizar: ' + (err.message || 'verifica los datos.'));
+        return;
+      }
+      setDisabledShowForm(true);
+      close(modalShow);
+      calendar.refetchEvents();
+    });
+
+    // ------- Eliminar (DELETE) -------
+    btnDelete?.addEventListener('click', async () => {
+      if (!canManage) return;
+      const id = sId.value;
+      if (!id) return;
+      if (!confirm('¿Eliminar este evento?')) return;
+
+      const res = await fetch(`/calendar/events/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+      });
+
+      if (!res.ok) { alert('No se pudo eliminar'); return; }
+      close(modalShow);
+      calendar.refetchEvents();
+    });
+
+    // ------- Cerrar modales por botones con data-close -------
+    document.querySelectorAll('[data-close]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        close(modalCreate);
+        close(modalShow);
+      });
+    });
   });
 }

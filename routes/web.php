@@ -26,30 +26,52 @@ Route::middleware('auth')->group(function () {
 
     // Perfil
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile',[ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile',[ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // ===== Calendar =====
     Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
     Route::get('/calendar/events', [CalendarController::class, 'fetch'])->name('calendar.fetch');
     Route::post('/calendar/events', [CalendarController::class, 'store'])->name('calendar.store');
     Route::get('/calendar/events/{event}', [CalendarController::class, 'show'])->name('calendar.show');
-    Route::match(['put','patch'], '/calendar/events/{event}', [CalendarController::class, 'update'])->name('calendar.update');
+    Route::match(['put', 'patch'], '/calendar/events/{event}', [CalendarController::class, 'update'])->name('calendar.update');
     Route::delete('/calendar/events/{event}', [CalendarController::class, 'destroy'])->name('calendar.destroy');
 
     // ===== Tickets =====
     Route::resource('tickets', TicketController::class);
-    Route::post('tickets/{ticket}/asignar',     [TicketController::class, 'asignar'])->name('tickets.asignar');
-    Route::post('tickets/{ticket}/estado',      [TicketController::class, 'cambiarEstado'])->name('tickets.estado');
-    Route::post('tickets/{ticket}/meta',        [TicketController::class, 'setMeta'])->name('tickets.meta');
-    Route::patch('tickets/{ticket}/management', [TicketController::class, 'managementUpdate'])->name('tickets.management');
-    Route::post('tickets/{ticket}/comentar',    [TicketController::class, 'comentar'])->name('tickets.comentar');
+
+    Route::post('tickets/{ticket}/asignar',     [TicketController::class, 'asignar'])
+        ->name('tickets.asignar');
+
+    // cambio de estado (autor / asignado)
+    Route::post('tickets/{ticket}/estado',      [TicketController::class, 'cambiarEstado'])
+        ->name('tickets.cambiarEstado');
+
+    // set meta (categoría/prioridad rápida, si lo usas en alguna vista)
+    Route::post('tickets/{ticket}/meta',        [TicketController::class, 'setMeta'])
+        ->name('tickets.meta');
+
+    // gestión completa (encargado / admin)
+    Route::patch('tickets/{ticket}/management', [TicketController::class, 'managementUpdate'])
+        ->name('tickets.management');
+
+    // comentarios
+    Route::post('tickets/{ticket}/comentar',    [TicketController::class, 'comentar'])
+        ->name('tickets.comentar');
+
+    // adjuntos desde show
+    Route::post('tickets/{ticket}/attachments', [TicketController::class, 'uploadAttachment'])
+        ->name('tickets.attachments.upload');
+
+    Route::delete('tickets/{ticket}/attachments/{attachment}', [TicketController::class, 'deleteAttachment'])
+        ->name('tickets.attachments.delete');
 
     // ===== Admin =====
     Route::prefix('admin')->name('admin.')->middleware('role:Administrador')->group(function () {
         Route::resource('departments', DepartmentController::class)
             ->parameters(['departments' => 'department'])
             ->except(['show']);
+
         Route::patch('departments/{department}/toggle', [DepartmentController::class, 'toggle'])
             ->name('departments.toggle');
 
@@ -63,23 +85,31 @@ Route::middleware('auth')->group(function () {
     Route::get('/requests/{requestForm}',      [RequestFormController::class, 'show'])->name('requests.show');
 
     // Aprobaciones
-    Route::post('/requests/{requestForm}/approve', [RequestApprovalController::class, 'approve'])->name('requests.approve');
-    Route::post('/requests/{requestForm}/reject',  [RequestApprovalController::class, 'reject'])->name('requests.reject');
+    Route::post('/requests/{requestForm}/approve', [RequestApprovalController::class, 'approve'])
+        ->name('requests.approve');
+    Route::post('/requests/{requestForm}/reject',  [RequestApprovalController::class, 'reject'])
+        ->name('requests.reject');
 
     // Completar compra
-    Route::post('/requests/{requestForm}/complete', [PurchaseCompletionController::class, 'complete'])->name('requests.complete');
+    Route::post('/requests/{requestForm}/complete', [PurchaseCompletionController::class, 'complete'])
+        ->name('requests.complete');
 
     // ===== Anuncios =====
     Route::get('/announcements/manage', [AnnouncementController::class, 'manage'])->name('announcements.manage');
     Route::get('/announcements/create', [AnnouncementController::class, 'create'])->name('announcements.create');
     Route::post('/announcements',       [AnnouncementController::class, 'store'])->name('announcements.store');
+
     Route::get('/announcements/{announcement}/edit', [AnnouncementController::class, 'edit'])
         ->whereNumber('announcement')->name('announcements.edit');
+
     Route::put('/announcements/{announcement}', [AnnouncementController::class, 'update'])
         ->whereNumber('announcement')->name('announcements.update');
+
     Route::delete('/announcements/{announcement}', [AnnouncementController::class, 'destroy'])
         ->whereNumber('announcement')->name('announcements.destroy');
+
     Route::get('/announcements/feed', [AnnouncementController::class, 'feed'])->name('announcements.feed');
+
     Route::post('/announcements/{announcement}/read', [AnnouncementController::class, 'markRead'])
         ->whereNumber('announcement')->name('announcements.read');
 

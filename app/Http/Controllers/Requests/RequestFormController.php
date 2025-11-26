@@ -50,6 +50,10 @@ class RequestFormController extends Controller
             $q->where('status', $status);
         }
 
+        if ($type = $req->get('type')) {
+            $q->where('type', $type);
+        }
+
         $requests = $q->with(['user', 'department'])->latest()->paginate(20);
         return view('requests.index', compact('requests'));
     }

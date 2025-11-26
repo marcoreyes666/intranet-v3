@@ -21,7 +21,7 @@ class NewAnnouncementNotification extends Notification implements ShouldQueue
             'title' => 'Nuevo aviso institucional',
             'body'  => $this->announcement->titulo,
             'icon'  => 'megaphone',
-            'url'   => route('announcements.show', $this->announcement->id),
+            'url'   => route('announcements.feed', $this->announcement->id),
             'meta'  => ['announcement_id' => $this->announcement->id],
         ];
     }

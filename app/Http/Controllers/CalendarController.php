@@ -92,6 +92,7 @@ class CalendarController extends Controller
         ]);
 
         $data['all_day'] = (bool)($data['all_day'] ?? false);
+        $data['user_id'] = $request->user()->id; // 👈 guardamos quién lo creó
 
         $event = Event::create($data);
 

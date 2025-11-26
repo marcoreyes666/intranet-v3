@@ -25,6 +25,40 @@
                 </p>
             </div>
 
+            {{-- Bloque "Mi estado" (autor / asignado) --}}
+            @if($puedeGestionarEstado)
+                <div class="bg-white dark:bg-gray-800 p-5 rounded shadow mt-5">
+                    <h3 class="font-medium mb-2">Mi estado</h3>
+
+                    @if($esAsignado)
+                        <p class="text-sm text-slate-600 mb-3">
+                            Eres el técnico asignado. Puedes marcar este ticket como
+                            <b>"En proceso"</b> cuando lo estés atendiendo o <b>"Resuelto"</b> al terminar.
+                        </p>
+                    @elseif($esAutor)
+                        <p class="text-sm text-slate-600 mb-3">
+                            Este es tu ticket. Cuando ya esté <b>Resuelto</b> por el área correspondiente,
+                            puedes marcarlo como <b>"Cerrado"</b>.
+                        </p>
+                    @endif
+
+                    <form method="POST" action="{{ route('tickets.cambiarEstado', $ticket) }}">
+                        @csrf {{-- IMPORTANTE: sin @method('PATCH') porque la ruta es POST --}}
+                        <div class="flex flex-wrap items-center gap-3">
+                            <label class="form-label mb-0">Cambiar a:</label>
+                            <select name="estado" class="form-select w-auto">
+                                @foreach($estadosAutorizados as $estadoPosible)
+                                    <option value="{{ $estadoPosible }}">{{ $estadoPosible }}</option>
+                                @endforeach
+                            </select>
+                            <button class="btn btn-primary">
+                                Actualizar mi estado
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            @endif
+
             {{-- Comentarios --}}
             <div class="bg-white dark:bg-gray-800 p-5 rounded shadow mt-5">
                 <h3 class="font-medium">Comentarios</h3>
@@ -48,8 +82,7 @@
                 {{-- Nuevo comentario --}}
                 <form method="POST" action="{{ route('tickets.comentar', $ticket) }}" class="mt-4">
                     @csrf
-                    <textarea name="comentario" class="form-control" rows="3" placeholder="Escribe un comentario..."
-                        required></textarea>
+                    <textarea name="comentario" class="form-control" rows="3" placeholder="Escribe un comentario..." required></textarea>
 
                     <div class="mt-2 flex items-center gap-4">
                         <label class="inline-flex items-center gap-2">
@@ -73,10 +106,9 @@
             <div class="bg-white dark:bg-gray-800 p-5 rounded shadow mt-5">
                 <h3 class="font-medium">Adjuntos</h3>
 
-                {{-- Solo el solicitante puede adjuntar --}}
+                {{-- Solo el solicitante puede adjuntar desde aquí --}}
                 @if(auth()->id() === $ticket->usuario_id)
-                    <form method="POST" action="{{ route('tickets.attachments.upload', $ticket) }}" class="mt-3"
-                        enctype="multipart/form-data">
+                    <form method="POST" action="{{ route('tickets.attachments.upload', $ticket) }}" class="mt-3" enctype="multipart/form-data">
                         @csrf
                         <label class="form-label">Adjuntar imagen (jpg/png/webp/gif, máx 5MB)</label>
                         <input type="file" name="imagen" accept="image/*" class="form-control" required>
@@ -90,15 +122,17 @@
                             <div class="border rounded p-2">
                                 <a href="{{ asset('storage/' . $a->path) }}" target="_blank" title="{{ $a->nombre_original }}">
                                     <img src="{{ asset('storage/' . $a->path) }}" alt="{{ $a->nombre_original }}"
-                                        class="w-full h-32 object-cover rounded">
+                                         class="w-full h-32 object-cover rounded">
                                 </a>
-                                <div class="text-xs mt-1 truncate" title="{{ $a->nombre_original }}">{{ $a->nombre_original }}
+                                <div class="text-xs mt-1 truncate" title="{{ $a->nombre_original }}">
+                                    {{ $a->nombre_original }}
                                 </div>
 
                                 @can('update', $ticket)
                                     <form method="POST" action="{{ route('tickets.attachments.delete', [$ticket, $a]) }}"
-                                        onsubmit="return confirm('¿Eliminar adjunto?')" class="mt-2">
-                                        @csrf @method('DELETE')
+                                          onsubmit="return confirm('¿Eliminar adjunto?')" class="mt-2">
+                                        @csrf
+                                        @method('DELETE')
                                         <button class="btn btn-danger btn-sm w-full">Eliminar</button>
                                     </form>
                                 @endcan
@@ -116,9 +150,11 @@
             <div class="bg-white dark:bg-gray-800 p-5 rounded shadow">
                 <h3 class="font-medium">Gestión</h3>
 
-                @can('update', $ticket)
-                    <form method="POST" action="{{ route('tickets.management.update', $ticket) }}" class="mt-3">
-                        @csrf @method('PATCH')
+                {{-- Solo Administrador o Encargado del departamento del ticket --}}
+                @can('assign', $ticket)
+                    <form method="POST" action="{{ route('tickets.management', $ticket) }}" class="mt-3">
+                        @csrf
+                        @method('PATCH')
 
                         <label class="form-label">Asignar a</label>
                         <select name="asignado_id" class="form-select">
@@ -153,14 +189,16 @@
                     </form>
                 @endcan
 
-                {{-- Editar / Eliminar (si sigues usando vistas de edición) --}}
+                {{-- Editar / Eliminar (si quieres conservar estas vistas) --}}
                 @can('update', $ticket)
                     <a href="{{ route('tickets.edit', $ticket) }}" class="btn btn-warning mt-5 w-full">Editar</a>
                 @endcan
+
                 @can('delete', $ticket)
                     <form method="POST" action="{{ route('tickets.destroy', $ticket) }}" class="mt-2"
-                        onsubmit="return confirm('¿Eliminar ticket?')">
-                        @csrf @method('DELETE')
+                          onsubmit="return confirm('¿Eliminar ticket?')">
+                        @csrf
+                        @method('DELETE')
                         <button class="btn btn-danger w-full">Eliminar</button>
                     </form>
                 @endcan

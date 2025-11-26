@@ -19,7 +19,7 @@ class User extends Authenticatable
         'email',
         'password',
         'department_id',
-        'birth_date',      // ← agregar para asignación masiva
+        'birth_date',
     ];
 
     protected $hidden = [

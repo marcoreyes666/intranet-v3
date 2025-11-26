@@ -3,13 +3,18 @@
 namespace App\Http\Requests\Ticket;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule; // 👈 FALTA ESTO
 
-class UpdateTicketRequest extends FormRequest {
-    public function authorize(): bool {
+class UpdateTicketRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
         $t = $this->route('ticket');
         return $this->user()->can('update', $t);
     }
-    public function rules(): array {
+
+    public function rules(): array
+    {
         return [
             'titulo'      => ['sometimes','required','string','max:150'],
             'descripcion' => ['nullable','string','max:5000'],
