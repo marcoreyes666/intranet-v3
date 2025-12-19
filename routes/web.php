@@ -7,13 +7,16 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\TicketController;
 use App\Http\Controllers\Admin\DepartmentController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\Admin\EventController as AdminEventController;
 use App\Http\Controllers\Requests\RequestFormController;
 use App\Http\Controllers\Requests\RequestApprovalController;
 use App\Http\Controllers\Requests\PurchaseCompletionController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\SoundRequestController;
 
-Route::get('/', fn () => view('welcome'));
+// Página pública inicial (puedes cambiar a redirect al dashboard si quieres)
+Route::get('/', fn() => view('welcome'));
 
 // Auth (Breeze)
 require __DIR__ . '/auth.php';
@@ -21,101 +24,195 @@ require __DIR__ . '/auth.php';
 // ===== Rutas protegidas =====
 Route::middleware('auth')->group(function () {
 
-    // Dashboard
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    // ===== Dashboard =====
+    Route::get('/dashboard', [DashboardController::class, 'index'])
+        ->name('dashboard');
 
-    // Perfil
-    Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
-    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    // ===== Perfil =====
+    Route::get('/profile', [ProfileController::class, 'edit'])
+        ->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])
+        ->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])
+        ->name('profile.destroy');
+
+    // ===== Admin (usuarios / departamentos / eventos) =====
+    Route::prefix('admin')
+        ->name('admin.')
+        ->middleware('role:Administrador')
+        ->group(function () {
+
+            // Departamentos
+            Route::resource('departments', DepartmentController::class)
+                ->parameters(['departments' => 'department'])
+                ->except(['show']);
+
+            Route::patch('departments/{department}/toggle', [DepartmentController::class, 'toggle'])
+                ->name('departments.toggle');
+
+            // Usuarios
+            Route::resource('users', UserController::class)
+                ->except(['show']);
+
+            // Eventos (solo gestión, no creación/edición)
+            Route::resource('events', AdminEventController::class)
+                ->only(['index', 'show', 'destroy'])
+                ->parameters(['events' => 'event']);
+        });
 
     // ===== Calendar =====
-    Route::get('/calendar', [CalendarController::class, 'index'])->name('calendar.index');
-    Route::get('/calendar/events', [CalendarController::class, 'fetch'])->name('calendar.fetch');
-    Route::post('/calendar/events', [CalendarController::class, 'store'])->name('calendar.store');
-    Route::get('/calendar/events/{event}', [CalendarController::class, 'show'])->name('calendar.show');
-    Route::match(['put', 'patch'], '/calendar/events/{event}', [CalendarController::class, 'update'])->name('calendar.update');
-    Route::delete('/calendar/events/{event}', [CalendarController::class, 'destroy'])->name('calendar.destroy');
+    Route::prefix('calendar')
+        ->name('calendar.')
+        ->group(function () {
+
+            Route::get('/', [CalendarController::class, 'index'])
+                ->name('index');
+
+            Route::get('/events', [CalendarController::class, 'fetch'])
+                ->name('fetch');
+
+            Route::post('/events', [CalendarController::class, 'store'])
+                ->name('store');
+
+            Route::get('/events/{event}', [CalendarController::class, 'show'])
+                ->name('show');
+
+            Route::match(['put', 'patch'], '/events/{event}', [CalendarController::class, 'update'])
+                ->name('update');
+
+            Route::delete('/events/{event}', [CalendarController::class, 'destroy'])
+                ->name('destroy');
+        });
 
     // ===== Tickets =====
     Route::resource('tickets', TicketController::class);
 
-    Route::post('tickets/{ticket}/asignar',     [TicketController::class, 'asignar'])
+    Route::post('tickets/{ticket}/asignar', [TicketController::class, 'asignar'])
         ->name('tickets.asignar');
 
-    // cambio de estado (autor / asignado)
-    Route::post('tickets/{ticket}/estado',      [TicketController::class, 'cambiarEstado'])
+    // Cambio de estado (autor / asignado)
+    Route::post('tickets/{ticket}/estado', [TicketController::class, 'cambiarEstado'])
         ->name('tickets.cambiarEstado');
 
-    // set meta (categoría/prioridad rápida, si lo usas en alguna vista)
-    Route::post('tickets/{ticket}/meta',        [TicketController::class, 'setMeta'])
+    // Set meta (categoría / prioridad)
+    Route::post('tickets/{ticket}/meta', [TicketController::class, 'setMeta'])
         ->name('tickets.meta');
 
-    // gestión completa (encargado / admin)
+    // Gestión completa (encargado / admin)
     Route::patch('tickets/{ticket}/management', [TicketController::class, 'managementUpdate'])
         ->name('tickets.management');
 
-    // comentarios
-    Route::post('tickets/{ticket}/comentar',    [TicketController::class, 'comentar'])
+    // Comentarios
+    Route::post('tickets/{ticket}/comentar', [TicketController::class, 'comentar'])
         ->name('tickets.comentar');
 
-    // adjuntos desde show
+    // Adjuntos desde show
     Route::post('tickets/{ticket}/attachments', [TicketController::class, 'uploadAttachment'])
         ->name('tickets.attachments.upload');
 
     Route::delete('tickets/{ticket}/attachments/{attachment}', [TicketController::class, 'deleteAttachment'])
         ->name('tickets.attachments.delete');
 
-    // ===== Admin =====
-    Route::prefix('admin')->name('admin.')->middleware('role:Administrador')->group(function () {
-        Route::resource('departments', DepartmentController::class)
-            ->parameters(['departments' => 'department'])
-            ->except(['show']);
+    // ===== Solicitud de sonido =====
+    // Rutas generales (usuario normal)
+    Route::resource('sound-requests', SoundRequestController::class)
+        ->only(['index', 'create', 'store', 'edit', 'update']);
 
-        Route::patch('departments/{department}/toggle', [DepartmentController::class, 'toggle'])
-            ->name('departments.toggle');
+    // Cancelar (dueño de la solicitud o Admin/Sistemas)
+    Route::post('sound-requests/{soundRequest}/cancel', [SoundRequestController::class, 'cancel'])
+        ->name('sound-requests.cancel');
 
-        Route::resource('users', UserController::class)->except(['show']);
+    // Rutas de revisión (solo Sistemas / Admin)
+    Route::middleware('role:Administrador|Sistemas')->group(function () {
+
+        Route::post('sound-requests/{soundRequest}/return', [SoundRequestController::class, 'returnToUser'])
+            ->name('sound-requests.return');
+
+        Route::post('sound-requests/{soundRequest}/accept', [SoundRequestController::class, 'accept'])
+            ->name('sound-requests.accept');
+
+        Route::post('sound-requests/{soundRequest}/reject', [SoundRequestController::class, 'reject'])
+            ->name('sound-requests.reject');
+
+        // Eliminar definitivamente
+        Route::delete('sound-requests/{soundRequest}', [SoundRequestController::class, 'destroy'])
+            ->name('sound-requests.destroy');
     });
 
-    // ===== Solicitudes =====
-    Route::get('/requests',                    [RequestFormController::class, 'index'])->name('requests.index');
-    Route::get('/requests/create/{type}',      [RequestFormController::class, 'create'])->name('requests.create');
-    Route::post('/requests',                   [RequestFormController::class, 'store'])->name('requests.store');
-    Route::get('/requests/{requestForm}',      [RequestFormController::class, 'show'])->name('requests.show');
+    // ===== Solicitudes (permisos, compras, etc.) =====
+    Route::prefix('requests')
+        ->name('requests.')
+        ->group(function () {
 
-    // Aprobaciones
-    Route::post('/requests/{requestForm}/approve', [RequestApprovalController::class, 'approve'])
-        ->name('requests.approve');
-    Route::post('/requests/{requestForm}/reject',  [RequestApprovalController::class, 'reject'])
-        ->name('requests.reject');
+            Route::get('/', [RequestFormController::class, 'index'])
+                ->name('index');
 
-    // Completar compra
-    Route::post('/requests/{requestForm}/complete', [PurchaseCompletionController::class, 'complete'])
-        ->name('requests.complete');
+            Route::get('/create/{type}', [RequestFormController::class, 'create'])
+                ->name('create');
+
+            Route::post('/', [RequestFormController::class, 'store'])
+                ->name('store');
+
+            Route::get('/{requestForm}', [RequestFormController::class, 'show'])
+                ->name('show');
+
+            // Aprobaciones
+            Route::post('/{requestForm}/approve', [RequestApprovalController::class, 'approve'])
+                ->name('approve');
+
+            Route::post('/{requestForm}/reject', [RequestApprovalController::class, 'reject'])
+                ->name('reject');
+
+            // Completar compra
+            Route::post('/{requestForm}/complete', [PurchaseCompletionController::class, 'complete'])
+                ->name('complete');
+        });
 
     // ===== Anuncios =====
-    Route::get('/announcements/manage', [AnnouncementController::class, 'manage'])->name('announcements.manage');
-    Route::get('/announcements/create', [AnnouncementController::class, 'create'])->name('announcements.create');
-    Route::post('/announcements',       [AnnouncementController::class, 'store'])->name('announcements.store');
+    Route::prefix('announcements')
+        ->name('announcements.')
+        ->group(function () {
 
-    Route::get('/announcements/{announcement}/edit', [AnnouncementController::class, 'edit'])
-        ->whereNumber('announcement')->name('announcements.edit');
+            Route::get('/manage', [AnnouncementController::class, 'manage'])
+                ->name('manage');
 
-    Route::put('/announcements/{announcement}', [AnnouncementController::class, 'update'])
-        ->whereNumber('announcement')->name('announcements.update');
+            Route::get('/create', [AnnouncementController::class, 'create'])
+                ->name('create');
 
-    Route::delete('/announcements/{announcement}', [AnnouncementController::class, 'destroy'])
-        ->whereNumber('announcement')->name('announcements.destroy');
+            Route::post('/', [AnnouncementController::class, 'store'])
+                ->name('store');
 
-    Route::get('/announcements/feed', [AnnouncementController::class, 'feed'])->name('announcements.feed');
+            Route::get('/{announcement}/edit', [AnnouncementController::class, 'edit'])
+                ->whereNumber('announcement')
+                ->name('edit');
 
-    Route::post('/announcements/{announcement}/read', [AnnouncementController::class, 'markRead'])
-        ->whereNumber('announcement')->name('announcements.read');
+            Route::put('/{announcement}', [AnnouncementController::class, 'update'])
+                ->whereNumber('announcement')
+                ->name('update');
+
+            Route::delete('/{announcement}', [AnnouncementController::class, 'destroy'])
+                ->whereNumber('announcement')
+                ->name('destroy');
+
+            Route::get('/feed', [AnnouncementController::class, 'feed'])
+                ->name('feed');
+
+            Route::post('/{announcement}/read', [AnnouncementController::class, 'markRead'])
+                ->whereNumber('announcement')
+                ->name('read');
+        });
 
     // ===== Notificaciones =====
-    Route::get('/notificaciones',            [NotificationController::class, 'index'])->name('notifications.index');
-    Route::post('/notificaciones/read-all',  [NotificationController::class, 'readAll'])->name('notifications.readAll');
-    Route::post('/notificaciones/{id}/read', [NotificationController::class, 'readOne'])->name('notifications.readOne');
-    Route::get('/notificaciones/{id}/go',    [NotificationController::class, 'go'])->name('notifications.go');
+    Route::prefix('notificaciones')
+        ->name('notifications.')
+        ->group(function () {
+
+            Route::get('/', [NotificationController::class, 'index'])->name('index');
+            Route::post('/read-all', [NotificationController::class, 'readAll'])->name('readAll');
+            Route::post('/{id}/read', [NotificationController::class, 'readOne'])->name('readOne');
+            Route::get('/{id}/go', [NotificationController::class, 'go'])->name('go');
+        });
+
+    Route::get('/notifications/summary', [NotificationController::class, 'summary'])
+        ->name('notifications.summary');
 });

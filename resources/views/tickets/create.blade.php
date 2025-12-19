@@ -32,7 +32,7 @@
             {{-- Adjuntar imágenes al crear --}}
             <div class="col-span-12">
                 <label class="form-label">Imágenes (opcional)</label>
-                <input type="file" name="imagenes[]" accept="image/*" class="form-control" multiple>
+                <input type="file" name="adjuntos[]" accept="image/*" class="form-control" multiple>
                 <div class="text-xs text-slate-500 mt-1">Formatos: jpg, jpeg, png, webp, gif. Máx 5MB c/u.</div>
                 @error('imagenes.*') <div class="text-danger mt-1">{{ $message }}</div> @enderror
             </div>

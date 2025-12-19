@@ -23,7 +23,10 @@ class AuthServiceProvider extends ServiceProvider
 
         // 👇 Registro de la policy de Ticket
         Ticket::class                    => TicketPolicy::class,
+        SoundRequest::class => SoundRequestPolicy::class,
     ];
 
-    public function boot(): void {}
+    public function boot(): void {
+        $this->registerPolicies();
+    }
 }

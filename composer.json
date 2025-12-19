@@ -10,6 +10,7 @@
         "barryvdh/laravel-dompdf": "^3.1",
         "doctrine/dbal": "^4.3",
         "laravel/framework": "^12.0",
+        "laravel/reverb": "^1.6",
         "laravel/tinker": "^2.10.1",
         "phpoffice/phpspreadsheet": "^5.0",
         "setasign/fpdi-fpdf": "^2.3",

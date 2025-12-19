@@ -11,11 +11,11 @@ class RolesSeeder extends Seeder
 {
     public function run(): void
     {
-        foreach (['Administrador','Rector','Encargado de departamento','Usuario'] as $name) {
+        foreach (['Administrador','Rector','Encargado de departamento','Usuario','Sistemas'] as $name) {
             Role::firstOrCreate(['name' => $name]);
         }
 
-        // Admin inicial
+        // Admin inicial (Sistemas / Administrador)
         $admin = User::firstOrCreate(
             ['email' => 'admin@intranet.test'],
             [
@@ -24,6 +24,7 @@ class RolesSeeder extends Seeder
             ]
         );
 
-        $admin->syncRoles(['Administrador']);
+        // Le damos ambos roles para que represente a Sistemas con control total
+        $admin->syncRoles(['Administrador', 'Sistemas']);
     }
 }

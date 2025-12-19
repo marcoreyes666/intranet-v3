@@ -2,7 +2,6 @@
 
 @section('content')
 <style>
-  /* Estilos mínimos (por si falla el CSS del tema) */
   .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.6rem 1rem;border-radius:.5rem;border:1px solid transparent;cursor:pointer;font-weight:600}
   .btn-primary{background:#1d4ed8;color:#fff}
   .btn-outline-secondary{background:#fff;border-color:#cbd5e1;color:#334155}
@@ -40,6 +39,20 @@
         </label>
         <input type="text" name="location" class="form-control mb-2" placeholder="Lugar">
         <textarea name="notes" class="form-control mb-3" placeholder="Notas"></textarea>
+
+        {{-- Bloque de solicitud de sonido --}}
+        <div class="mb-3" style="border-top:1px solid #e5e7eb;padding-top:.75rem;margin-top:.75rem">
+          <label class="mb-2" style="display:flex;align-items:center;gap:.5rem">
+            <input type="checkbox" name="request_sound">
+            Solicitar sonido / equipo audiovisual
+          </label>
+          <textarea name="sound_requirements" class="form-control" rows="3"
+            placeholder="Ej. 2 bocinas, 1 micrófono inalámbrico, 1 pantalla, etc."></textarea>
+          <div class="text-xs text-slate-500 mt-1">
+            Recuerda: la solicitud de sonido debe hacerse al menos con 3 días de anticipación.
+          </div>
+        </div>
+
         <div class="text-right">
           <button type="button" class="btn btn-outline-secondary mr-2" data-close>Cancelar</button>
           <button class="btn btn-primary">Guardar</button>

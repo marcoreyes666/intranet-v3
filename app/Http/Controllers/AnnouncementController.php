@@ -107,13 +107,22 @@ class AnnouncementController extends Controller
         return back()->with('ok', 'Aviso eliminado');
     }
 
-    // Feed para dashboard
     public function feed()
     {
-        $items = Announcement::visibleTo(auth()->user())
-            ->orderByDesc('is_pinned')->latest()->limit(10)->get();
-        return view('announcements.feed', compact('items'));
+        $user = auth()->user();
+
+        $items = Announcement::visibleTo($user)
+            ->orderByDesc('is_pinned')
+            ->latest()
+            ->limit(20)
+            ->get();
+
+        $reads = AnnouncementRead::where('user_id', $user->id)
+            ->pluck('read_at', 'announcement_id');
+
+        return view('announcements.index', compact('items', 'reads'));
     }
+
 
     // Marcar como leído
     public function markRead(Announcement $announcement)

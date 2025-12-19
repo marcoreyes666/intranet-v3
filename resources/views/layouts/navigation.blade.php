@@ -16,27 +16,51 @@
                         {{ __('Dashboard') }}
                     </x-nav-link>
 
-                    @role('Administrador')
+                    @hasanyrole('Administrador|Sistemas')
                     <x-nav-link :href="route('admin.departments.index')"
                         :active="request()->routeIs('admin.departments.*')">
                         {{ __('Departamentos') }}
                     </x-nav-link>
-                    @endrole
+                    @endhasanyrole
 
-                    @role('Administrador')
+                    @hasanyrole('Administrador|Sistemas')
                     <x-nav-link :href="route('admin.users.index')" :active="request()->routeIs('admin.users.*')">
                         {{ __('Usuarios') }}
                     </x-nav-link>
-                    @endrole
+                    @endhasanyrole
+
+                    @hasanyrole('Administrador|Sistemas')
+                    <x-nav-link :href="route('admin.events.index')" :active="request()->routeIs('admin.events.*')">
+                        {{ __('Eventos') }}
+                    </x-nav-link>
+                    @endhasanyrole
 
                     <x-nav-link :href="route('calendar.index')" :active="request()->routeIs('calendar.index')">
                         {{ __('Calendario') }}
                     </x-nav-link>
 
+                    <x-nav-link :href="route('sound-requests.index')" :active="request()->routeIs('sound-requests.*')">
+                        {{ __('Solicitudes de sonido') }}
+                    </x-nav-link>
                 </div>
             </div>
 
             <!-- Settings Dropdown -->
+            @auth
+                @php $notifCount = auth()->user()->unreadNotifications()->count(); @endphp
+
+                <a href="{{ route('notifications.index') }}"
+                    class="relative inline-flex items-center mr-3 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                    <i data-lucide="bell" class="w-5 h-5"></i>
+                    @if($notifCount)
+                        <span
+                            class="absolute -top-1 -right-1 text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+                            {{ $notifCount }}
+                        </span>
+                    @endif
+                </a>
+            @endauth
+
             <div class="hidden sm:flex sm:items-center sm:ms-6">
                 <x-dropdown align="right" width="48">
                     <x-slot name="trigger">
@@ -94,6 +118,34 @@
         <div class="pt-2 pb-3 space-y-1">
             <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                 {{ __('Dashboard') }}
+            </x-responsive-nav-link>
+
+            @hasanyrole('Administrador|Sistemas')
+            <x-responsive-nav-link :href="route('admin.departments.index')"
+                :active="request()->routeIs('admin.departments.*')">
+                {{ __('Departamentos') }}
+            </x-responsive-nav-link>
+            @endhasanyrole
+
+            @hasanyrole('Administrador|Sistemas')
+            <x-responsive-nav-link :href="route('admin.users.index')" :active="request()->routeIs('admin.users.*')">
+                {{ __('Usuarios') }}
+            </x-responsive-nav-link>
+            @endhasanyrole
+
+            @hasanyrole('Administrador|Sistemas')
+            <x-responsive-nav-link :href="route('admin.events.index')" :active="request()->routeIs('admin.events.*')">
+                {{ __('Eventos') }}
+            </x-responsive-nav-link>
+            @endhasanyrole
+
+            <x-responsive-nav-link :href="route('calendar.index')" :active="request()->routeIs('calendar.index')">
+                {{ __('Calendario') }}
+            </x-responsive-nav-link>
+
+            <x-responsive-nav-link :href="route('sound-requests.index')"
+                :active="request()->routeIs('sound-requests.*')">
+                {{ __('Solicitudes de sonido') }}
             </x-responsive-nav-link>
         </div>
 

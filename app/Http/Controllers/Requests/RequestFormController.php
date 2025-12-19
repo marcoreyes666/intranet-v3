@@ -30,7 +30,7 @@ class RequestFormController extends Controller
 
         // Bandeja base por rol
         if ($user->hasAnyRole(['Administrador', 'Rector'])) {
-            $q = RequestForm::query()->latest();
+            $q = RequestForm::query();
         } elseif ($user->hasRole('Compras')) {
             $q = RequestForm::query()->where('type', 'compra');
         } elseif ($user->hasRole('Contabilidad')) {
@@ -38,11 +38,13 @@ class RequestFormController extends Controller
         } elseif ($user->hasRole('Encargado de departamento')) {
             $q = RequestForm::query()->where('department_id', $user->department_id);
         } else {
+            // Usuario normal: solo las suyas
             $q = RequestForm::query()->where('user_id', $user->id);
         }
 
         // Pendientes por aprobar (scope en el modelo)
         if ($req->get('filter') === 'pendientes' && $this->isApprover($user)) {
+            // Usamos directamente el scope, que ya filtra por rol
             $q = RequestForm::query()->pendingForApprover($user);
         }
 
@@ -54,7 +56,11 @@ class RequestFormController extends Controller
             $q->where('type', $type);
         }
 
-        $requests = $q->with(['user', 'department'])->latest()->paginate(20);
+        $requests = $q
+            ->with(['user', 'department'])
+            ->latest()
+            ->paginate(20);
+
         return view('requests.index', compact('requests'));
     }
 
@@ -65,16 +71,19 @@ class RequestFormController extends Controller
 
     public function create(string $type)
     {
-        abort_unless(in_array($type, ['permiso', 'cheque', 'compra']), 404);
+        abort_unless(in_array($type, ['permiso', 'cheque', 'compra'], true), 404);
+
         $this->authorize('create', RequestForm::class);
+
         return view("requests.create-$type");
     }
 
     public function store(Request $req)
     {
         $this->authorize('create', RequestForm::class);
+
         $type = $req->input('type');
-        abort_unless(in_array($type, ['permiso', 'cheque', 'compra']), 422);
+        abort_unless(in_array($type, ['permiso', 'cheque', 'compra'], true), 422);
 
         return DB::transaction(function () use ($req, $type) {
             $user = $req->user();
@@ -91,45 +100,64 @@ class RequestFormController extends Controller
             // Detalles + siembra de niveles
             if ($type === 'permiso') {
                 $val = app(StorePermissionRequest::class)->validated();
+
                 PermissionDetail::create(['request_form_id' => $rf->id] + $val);
+
                 $this->seedLevels($rf, [
                     ['level' => 1, 'role' => 'Encargado'],
                     ['level' => 2, 'role' => 'Rector'],
                 ]);
             } elseif ($type === 'cheque') {
                 $val = app(StoreChequeRequest::class)->validated();
+
                 ChequeDetail::create(['request_form_id' => $rf->id] + $val);
+
                 $this->seedLevels($rf, [
                     ['level' => 1, 'role' => 'Contabilidad'],
                     ['level' => 2, 'role' => 'Rector'],
                 ]);
             } else { // compra
                 $val = app(StorePurchaseRequest::class)->validated();
+
                 $detail = PurchaseDetail::create([
                     'request_form_id' => $rf->id,
                     'justification'   => $val['justification'],
                     'urls'            => $val['urls'] ?? [],
                 ]);
+
                 foreach ($val['items'] as $it) {
                     PurchaseItem::create(['purchase_detail_id' => $detail->id] + $it);
                 }
+
                 $this->seedLevels($rf, [
                     ['level' => 1, 'role' => 'Compras'],
                     ['level' => 2, 'role' => 'Rector'],
                 ]);
             }
 
-            // 🚀 Notificación vía evento (listeners decidirán destinatarios)
+            // Evento → listeners deciden a quién notificar
             event(new EvRequestCreated($rf));
 
-            return redirect()->route('requests.show', $rf)->with('ok', 'Solicitud creada');
+            return redirect()
+                ->route('requests.show', $rf)
+                ->with('ok', 'Solicitud creada');
         });
     }
 
     public function show(RequestForm $requestForm)
     {
         $this->authorize('view', $requestForm);
-        $requestForm->load(['approvals', 'permiso', 'cheque', 'compra.items', 'user', 'department']);
+
+        $requestForm->load([
+            'approvals.decider',
+            'permiso',
+            'cheque',
+            'compra.items',
+            'compra.completedBy',
+            'user',
+            'department',
+        ]);
+
         return view('requests.show', compact('requestForm'));
     }
 

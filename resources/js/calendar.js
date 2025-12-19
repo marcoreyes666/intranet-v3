@@ -1,4 +1,3 @@
-// resources/js/calendar.js
 import { Calendar } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -29,6 +28,8 @@ if (!window.__calendarInit) {
     const cAllDay     = formCreate?.elements['all_day'];
     const cLocation   = formCreate?.elements['location'];
     const cNotes      = formCreate?.elements['notes'];
+    const cRequestSound      = formCreate?.elements['request_sound'];
+    const cSoundRequirements = formCreate?.elements['sound_requirements'];
 
     // Campos de show/edit
     const sId         = formShow?.elements['id'];
@@ -70,9 +71,11 @@ if (!window.__calendarInit) {
       cAllDay.checked = false;
       cLocation.value = '';
       cNotes.value    = '';
+      if (cRequestSound)      cRequestSound.checked = false;
+      if (cSoundRequirements) cSoundRequirements.value = '';
     };
 
-    // ------- Botón "Nuevo evento" (coincide con id="btn-new-event") -------
+    // ------- Botón "Nuevo evento" -------
     if (btnNewEvent && canManage) {
       btnNewEvent.addEventListener('click', () => {
         resetCreateForm();
@@ -100,12 +103,11 @@ if (!window.__calendarInit) {
           return;
         }
 
-        // Cargar detalles reales desde backend
         const id  = info.event.id;
         const res = await fetch(`/calendar/events/${id}`, { headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' } });
         if (!res.ok) { alert('No se pudo cargar el evento'); return; }
         const payload = await res.json();
-        const data = payload.event || payload; // por si devuelves plano
+        const data = payload.event || payload;
 
         if (sId)       sId.value       = data.id ?? '';
         if (sTitle)    sTitle.value    = data.title ?? '';
@@ -115,7 +117,6 @@ if (!window.__calendarInit) {
         if (sLocation) sLocation.value = data.location ?? '';
         if (sNotes)    sNotes.value    = data.notes ?? data.description ?? '';
 
-        // Mostrar en modo lectura
         setDisabledShowForm(true);
         open(modalShow);
       },
@@ -126,6 +127,7 @@ if (!window.__calendarInit) {
     // ------- Crear (POST) -------
     formCreate?.addEventListener('submit', async (e) => {
       e.preventDefault();
+
       const body = {
         title: cTitle.value,
         start: cStart.value,
@@ -133,6 +135,8 @@ if (!window.__calendarInit) {
         all_day: cAllDay.checked ? 1 : 0,
         location: cLocation.value || null,
         notes: cNotes.value || null,
+        request_sound: cRequestSound?.checked ? 1 : 0,
+        sound_requirements: cSoundRequirements?.value || null,
       };
 
       const res = await fetch('/calendar/events', {
@@ -146,6 +150,13 @@ if (!window.__calendarInit) {
         alert('Error al crear: ' + (err.message || 'verifica los datos.'));
         return;
       }
+
+      const data = await res.json().catch(() => ({}));
+
+      if (data.late_warning) {
+        alert(data.late_warning);
+      }
+
       close(modalCreate);
       calendar.refetchEvents();
     });

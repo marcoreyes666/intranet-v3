@@ -1,22 +1,38 @@
-<?php // app/Events/TicketUpdated.php
+<?php
+
 namespace App\Events;
 
 use App\Models\Ticket;
-use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Broadcasting\Channel;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Queue\SerializesModels;
 
-class TicketUpdated
+class TicketUpdated implements ShouldBroadcastNow
 {
-    use Dispatchable, SerializesModels;
-    public function __construct(public Ticket $ticket) {}
-    public function context(): array {
+    use SerializesModels;
+
+    public function __construct(public Ticket $ticket, public string $action) {}
+
+    public function broadcastOn(): array
+    {
+        return [new Channel('tickets')];
+    }
+
+    public function broadcastAs(): string
+    {
+        return 'ticket.updated';
+    }
+
+    public function broadcastWith(): array
+    {
         return [
-            'type' => 'ticket.updated',
-            'ticket_id' => $this->ticket->id,
-            'departamento_id' => $this->ticket->departamento_id,
-            'asignado_id' => $this->ticket->asignado_id,
-            'usuario_id' => $this->ticket->usuario_id,
-            'titulo' => $this->ticket->titulo,
+            'id'            => $this->ticket->id,
+            'action'        => $this->action, // created|updated|assigned|status_changed|commented|attachment_changed|deleted
+            'estado'        => $this->ticket->estado,
+            'prioridad'     => $this->ticket->prioridad,
+            'departamento_id'=> $this->ticket->departamento_id,
+            'asignado_id'   => $this->ticket->asignado_id,
+            'updated_at'    => optional($this->ticket->updated_at)->toISOString(),
         ];
     }
 }

@@ -13,16 +13,21 @@ class NewAnnouncementNotification extends Notification implements ShouldQueue
 
     public function __construct(public Announcement $announcement) {}
 
-    public function via($notifiable): array { return ['database']; }
+    public function via($notifiable): array
+    {
+        return ['database'];
+    }
 
     public function toArray($notifiable): array
     {
         return [
             'title' => 'Nuevo aviso institucional',
-            'body'  => $this->announcement->titulo,
+            'body'  => $this->announcement->title, // ✅ correcto
             'icon'  => 'megaphone',
-            'url'   => route('announcements.feed', $this->announcement->id),
-            'meta'  => ['announcement_id' => $this->announcement->id],
+            'url'   => route('announcements.feed'),
+            'meta'  => [
+                'announcement_id' => $this->announcement->id,
+            ],
         ];
     }
 }

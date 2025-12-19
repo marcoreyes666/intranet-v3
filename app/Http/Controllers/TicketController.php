@@ -2,307 +2,439 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\Ticket\StoreTicketRequest;
-use App\Http\Requests\Ticket\UpdateTicketRequest;
-use App\Models\Department;
 use App\Models\Ticket;
-use App\Models\TicketAttachment;
 use App\Models\TicketComment;
+use App\Models\TicketAttachment;
+use App\Models\Department;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rule;
-use App\Services\NotifyRecipients;
+use Illuminate\Support\Facades\Notification;
+
+use App\Http\Requests\Ticket\StoreTicketRequest;
+use App\Http\Requests\Ticket\UpdateTicketRequest;
+
+use App\Notifications\NewTicketForDepartmentNotification;
+use App\Notifications\TicketAssignedNotification;
+use App\Notifications\TicketUpdatedNotification;
 
 class TicketController extends Controller
 {
     public function __construct()
     {
-        $this->middleware(['auth']);
-        $this->authorizeResource(Ticket::class, 'ticket');
+        $this->middleware('auth');
     }
 
+    // ==========================
+    // LISTADO
+    // ==========================
     public function index(Request $request)
     {
-        $tickets = Ticket::query()
-            ->visibleTo($request->user())
-            ->with(['usuario', 'asignado', 'departamento'])
-            ->when($request->filled('estado'), fn ($q) => $q->where('estado', $request->estado))
-            ->when($request->filled('categoria'), fn ($q) => $q->where('categoria', $request->categoria))
-            ->when($request->filled('prioridad'), fn ($q) => $q->where('prioridad', $request->prioridad))
-            ->when($request->filled('departamento_id'), fn ($q) => $q->where('departamento_id', $request->departamento_id))
-            ->orderByDesc('id')
-            ->paginate(15)
-            ->appends($request->query());
+        $user = $request->user();
 
-        $departamentos = Department::orderBy('name')->get(['id', 'name']);
+        $query = Ticket::query()
+            ->with(['usuario', 'asignado', 'departamento'])
+            ->visibleTo($user);
+
+        if ($estado = $request->get('estado')) {
+            $query->where('estado', $estado);
+        }
+
+        if ($categoria = $request->get('categoria')) {
+            $query->where('categoria', $categoria);
+        }
+
+        if ($prioridad = $request->get('prioridad')) {
+            $query->where('prioridad', $prioridad);
+        }
+
+        if ($departamentoId = $request->get('departamento_id')) {
+            $query->where('departamento_id', $departamentoId);
+        }
+
+        $tickets = $query->orderByDesc('id')->paginate(20);
+        $departamentos = Department::orderBy('name')->get();
 
         return view('tickets.index', compact('tickets', 'departamentos'));
     }
 
+    // ==========================
+    // CREAR
+    // ==========================
     public function create()
     {
-        // Por ahora solo estos departamentos recibirán y administrarán tickets
-        $departamentos = Department::whereIn('name', ['Sistemas', 'Mantenimiento'])
-            ->orderBy('name')
-            ->get(['id', 'name']);
+        $this->authorize('create', Ticket::class);
+
+        $departamentos = Department::orderBy('name')->get();
 
         return view('tickets.create', compact('departamentos'));
     }
 
-    public function store(StoreTicketRequest $request, NotifyRecipients $notify)
+    public function store(StoreTicketRequest $request)
     {
-        $data = $request->safe()->except(['categoria', 'prioridad', 'estado', 'adjuntos', 'imagenes']);
+        $user = $request->user();
+        $data = $request->validated();
 
-        $data['usuario_id']      = $request->user()->id;
-        $data['departamento_id'] = $data['departamento_id'] ?? $request->user()->department_id;
-        $data['categoria']       = $request->input('categoria');
-        $data['prioridad']       = $request->input('prioridad');
-        $data['estado']          = 'Abierto';
+        $ticket = Ticket::create([
+            'titulo'          => $data['titulo'],
+            'descripcion'     => $data['descripcion'] ?? null,
+            'categoria'       => $data['categoria'] ?? null,
+            'prioridad'       => $data['prioridad'] ?? 'Media',
+            'estado'          => 'Abierto',
+            'usuario_id'      => $user->id,
+            'asignado_id'     => null,
+            'departamento_id' => $data['departamento_id'] ?? null,
+        ]);
 
-        $ticket = Ticket::create($data);
+        $this->handleAttachmentsUpload($request, $ticket);
 
-        $this->saveAttachmentsFromRequest($request, $ticket);
+        // Notifica depto + push campana a destinatarios
+        $this->notifyNewTicketForDepartment($ticket);
 
-        // Notificaciones mínimas
-        $notify->onTicketCreatedForDepartment($ticket);
-        if ($ticket->asignado_id) {
-            $notify->onTicketAssigned($ticket);
-        }
+        // Tiempo real para listados
+        event(new \App\Events\TicketUpdated($ticket, 'created'));
 
-        return redirect()->route('tickets.show', $ticket)->with('success', 'Ticket creado.');
+        return redirect()
+            ->route('tickets.show', $ticket)
+            ->with('ok', 'Ticket creado correctamente.');
     }
 
-    public function show(Ticket $ticket)
+    // ==========================
+    // VER DETALLE
+    // ==========================
+    public function show(Request $request, Ticket $ticket)
     {
-        $user = request()->user();
-        $puedeVerInternos = false;
+        $this->authorize('view', $ticket);
 
-        if ($user) {
-            $puedeVerInternos =
-                $user->hasAnyRole(['Administrador', 'Encargado de departamento', 'Rector']) ||
-                ($user->department_id && $user->department_id === $ticket->departamento_id);
-        }
+        $user = $request->user();
 
-        $ticket->load(['usuario', 'asignado', 'departamento', 'attachments']);
+        $puedeVerInternos = $user->hasAnyRole(['Administrador', 'Encargado de departamento', 'Rector']);
 
-        $commentsQuery = $ticket->comments()->with('user')->orderBy('id');
+        $commentsQuery = $ticket->comments()
+            ->with('user')
+            ->orderBy('created_at');
+
         if (! $puedeVerInternos) {
             $commentsQuery->where('visibility', 'publico');
         }
+
         $comments = $commentsQuery->get();
 
-        $tecnicos = User::where('department_id', $ticket->departamento_id)
+        $tecnicos = User::query()
+            ->where('department_id', $ticket->departamento_id)
             ->orderBy('name')
-            ->get(['id', 'name']);
+            ->get();
 
-        $departamentos = Department::orderBy('name')->get(['id', 'name']);
-
-        // --- Lógica para "Mi estado" ---
-        $esAsignado = $user && $ticket->asignado_id === $user->id;
-        $esAutor    = $user && $ticket->usuario_id === $user->id;
+        $esAutor    = $user->id === $ticket->usuario_id;
+        $esAsignado = $user->id === $ticket->asignado_id;
 
         $estadosAutorizados = [];
-
-        if ($esAsignado) {
-            // El técnico asignado puede mover entre Abierto / En proceso / Resuelto (según la Policy::transition)
-            $map = [
-                'Abierto'    => ['En proceso'],
-                'En proceso' => ['Resuelto'],
-                'Resuelto'   => ['En proceso'], // por si necesita reabrir
-                'Cerrado'    => [],
-            ];
-            $estadosAutorizados = $map[$ticket->estado] ?? [];
-        } elseif ($esAutor) {
-            // El autor puede cerrar su ticket cuando está Resuelto
-            if ($ticket->estado === 'Resuelto') {
-                $estadosAutorizados = ['Cerrado'];
+        foreach (['Abierto', 'En proceso', 'Resuelto', 'Cerrado'] as $to) {
+            if (Gate::forUser($user)->allows('transition', [$ticket, $to])) {
+                $estadosAutorizados[] = $to;
             }
         }
 
-        $puedeGestionarEstado = !empty($estadosAutorizados);
+        $puedeGestionarEstado = count($estadosAutorizados) > 0;
 
-        return view('tickets.show', compact(
-            'ticket',
-            'tecnicos',
-            'departamentos',
-            'comments',
-            'puedeVerInternos',
-            'esAsignado',
-            'esAutor',
-            'estadosAutorizados',
-            'puedeGestionarEstado'
-        ));
-    }
-
-    public function edit(Ticket $ticket)
-    {
-        return view('tickets.edit', compact('ticket'));
-    }
-
-    public function update(UpdateTicketRequest $request, Ticket $ticket, NotifyRecipients $notify)
-    {
-        $ticket->update($request->validated());
-
-        if ($ticket->estado === 'Resuelto' && ! $ticket->resuelto_en) {
-            $ticket->resuelto_en = Carbon::now();
-            $ticket->save();
-        }
-
-        $this->saveAttachmentsFromRequest($request, $ticket);
-
-        $notify->onTicketUpdated($ticket, $request->user());
-
-        return redirect()->route('tickets.show', $ticket)->with('success', 'Ticket actualizado.');
-    }
-
-    public function destroy(Ticket $ticket)
-    {
-        $ticket->delete();
-
-        return redirect()->route('tickets.index')->with('success', 'Ticket eliminado.');
-    }
-
-    // --- Acciones de gestión ---
-
-    public function managementUpdate(Request $request, Ticket $ticket, NotifyRecipients $notify)
-    {
-        // Solo Admin o Encargado de departamento del ticket
-        $this->authorize('assign', $ticket);
-
-        $validated = $request->validate([
-            'asignado_id' => [
-                'nullable',
-                Rule::exists('users', 'id')->where(
-                    fn ($q) => $q->where('department_id', $ticket->departamento_id)
-                ),
-            ],
-            'estado'    => ['required', Rule::in(['Abierto', 'En proceso', 'Resuelto', 'Cerrado'])],
-            'categoria' => ['required', Rule::in(['Sistemas', 'Mantenimiento', 'Redes', 'Impresoras', 'Software', 'Infraestructura'])],
-            'prioridad' => ['required', Rule::in(['Baja', 'Media', 'Alta', 'Crítica'])],
+        return view('tickets.show', [
+            'ticket'              => $ticket->load(['usuario', 'asignado', 'departamento', 'attachments']),
+            'comments'            => $comments,
+            'tecnicos'            => $tecnicos,
+            'puedeVerInternos'    => $puedeVerInternos,
+            'esAutor'             => $esAutor,
+            'esAsignado'          => $esAsignado,
+            'puedeGestionarEstado' => $puedeGestionarEstado,
+            'estadosAutorizados'  => $estadosAutorizados,
         ]);
-
-        $ticket->fill($validated);
-
-        if ($ticket->estado === 'Resuelto' && ! $ticket->resuelto_en) {
-            $ticket->resuelto_en = now();
-        }
-
-        $ticket->save();
-
-        if ($request->filled('asignado_id')) {
-            $notify->onTicketAssigned($ticket);
-        }
-
-        $notify->onTicketUpdated($ticket, $request->user());
-
-        return back()->with('success', 'Cambios guardados.');
     }
 
-    public function setMeta(Request $request, Ticket $ticket, NotifyRecipients $notify)
+    // ==========================
+    // EDITAR BÁSICO
+    // ==========================
+    public function edit(Ticket $ticket)
     {
         $this->authorize('update', $ticket);
 
-        $validated = $request->validate([
-            'categoria' => ['required', Rule::in(['Sistemas', 'Mantenimiento', 'Redes', 'Impresoras', 'Software', 'Infraestructura'])],
-            'prioridad' => ['required', Rule::in(['Baja', 'Media', 'Alta', 'Crítica'])],
-        ]);
+        $departamentos = Department::orderBy('name')->get();
 
-        $ticket->update($validated);
-
-        $notify->onTicketUpdated($ticket, $request->user());
-
-        return back()->with('success', 'Categoría y prioridad actualizadas.');
+        return view('tickets.edit', compact('ticket', 'departamentos'));
     }
 
-    public function asignar(Request $request, Ticket $ticket, NotifyRecipients $notify)
+    public function update(UpdateTicketRequest $request, Ticket $ticket)
+    {
+        $this->authorize('update', $ticket);
+
+        $actor = $request->user();
+        $data  = $request->validated();
+
+        $oldAsignado = $ticket->asignado_id;
+
+        $ticket->fill([
+            'titulo'      => $data['titulo']      ?? $ticket->titulo,
+            'descripcion' => $data['descripcion'] ?? $ticket->descripcion,
+            'prioridad'   => $data['prioridad']   ?? $ticket->prioridad,
+            'asignado_id' => $data['asignado_id'] ?? $ticket->asignado_id,
+        ]);
+
+        $ticket->save();
+
+        $this->handleAttachmentsUpload($request, $ticket);
+
+        if ($oldAsignado !== $ticket->asignado_id) {
+            $this->notifyTicketAssigned($ticket, $actor);
+        }
+
+        $this->notifyTicketUpdated($ticket, $actor);
+
+        event(new \App\Events\TicketUpdated($ticket, 'updated'));
+
+        return redirect()
+            ->route('tickets.show', $ticket)
+            ->with('ok', 'Ticket actualizado.');
+    }
+
+    // ==========================
+    // ASIGNACIÓN
+    // ==========================
+    public function asignar(Request $request, Ticket $ticket)
     {
         $this->authorize('assign', $ticket);
 
-        $request->validate(
-            [
-                'asignado_id' => [
-                    'nullable',
-                    Rule::exists('users', 'id')->where(
-                        fn ($q) => $q->where('department_id', $ticket->departamento_id)
-                    ),
-                ],
-            ],
-            [
-                'asignado_id.exists' => 'El usuario seleccionado no pertenece al departamento del ticket.',
-            ]
-        );
+        $data = $request->validate([
+            'asignado_id' => ['nullable', 'exists:users,id'],
+        ]);
 
-        $ticket->asignado_id = $request->asignado_id ?: null;
+        $actor       = $request->user();
+        $oldAsignado = $ticket->asignado_id;
+
+        $ticket->asignado_id = $data['asignado_id'] ?? null;
         $ticket->save();
 
-        if ($ticket->asignado_id) {
-            $notify->onTicketAssigned($ticket);
+        if ($oldAsignado !== $ticket->asignado_id) {
+            $this->notifyTicketAssigned($ticket, $actor);
         }
 
-        return back()->with('success', 'Técnico asignado.');
+        $this->notifyTicketUpdated($ticket, $actor);
+
+        event(new \App\Events\TicketUpdated($ticket, 'assigned'));
+
+        return back()->with('ok', 'Asignación actualizada.');
     }
 
-    public function cambiarEstado(Request $request, Ticket $ticket, NotifyRecipients $notify)
+    // ==========================
+    // ESTADO
+    // ==========================
+    public function cambiarEstado(Request $request, Ticket $ticket)
     {
-        $to = $request->validate([
-            'estado' => ['required', Rule::in(['Abierto', 'En proceso', 'Resuelto', 'Cerrado'])],
-        ])['estado'];
+        $user = $request->user();
 
-        $this->authorize('transition', [$ticket, $to]);
+        $data = $request->validate([
+            'estado' => ['required', 'in:Abierto,En proceso,Resuelto,Cerrado'],
+        ]);
 
-        $from = $ticket->estado;
+        $to = $data['estado'];
+
+        if (! Gate::forUser($user)->allows('transition', [$ticket, $to])) {
+            return back()->with('error', 'No puedes cambiar el estado a esa opción.');
+        }
+
         $ticket->estado = $to;
 
-        if ($to === 'Resuelto' && ! $ticket->resuelto_en) {
+        if ($to === 'Resuelto') {
             $ticket->resuelto_en = now();
         }
 
         $ticket->save();
 
-        $notify->onTicketUpdated($ticket, $request->user());
+        $this->notifyTicketUpdated($ticket, $user);
 
-        return back()->with('success', "Estado actualizado: {$from} → {$to}");
+        event(new \App\Events\TicketUpdated($ticket, 'status_changed'));
+
+        return back()->with('ok', 'Estado actualizado.');
     }
 
-    public function comentar(Request $request, Ticket $ticket, NotifyRecipients $notify)
+    // ==========================
+    // METADATOS
+    // ==========================
+    public function setMeta(Request $request, Ticket $ticket)
+    {
+        $this->authorize('update', $ticket);
+
+        $data = $request->validate([
+            'categoria' => ['nullable', 'in:Sistemas,Mantenimiento,Redes,Impresoras,Software,Infraestructura'],
+            'prioridad' => ['nullable', 'in:Baja,Media,Alta,Crítica'],
+        ]);
+
+        $actor = $request->user();
+
+        if (array_key_exists('categoria', $data)) {
+            $ticket->categoria = $data['categoria'];
+        }
+        if (array_key_exists('prioridad', $data)) {
+            $ticket->prioridad = $data['prioridad'];
+        }
+
+        $ticket->save();
+
+        $this->notifyTicketUpdated($ticket, $actor);
+
+        event(new \App\Events\TicketUpdated($ticket, 'updated'));
+
+        return back()->with('ok', 'Metadatos actualizados.');
+    }
+
+    // ==========================
+    // GESTIÓN (ADMIN)
+    // ==========================
+    public function managementUpdate(Request $request, Ticket $ticket)
+    {
+        $this->authorize('assign', $ticket);
+
+        $data = $request->validate([
+            'asignado_id' => ['nullable', 'exists:users,id'],
+            'estado'      => ['required', 'in:Abierto,En proceso,Resuelto,Cerrado'],
+            'categoria'   => ['nullable', 'in:Sistemas,Mantenimiento,Redes,Impresoras,Software,Infraestructura'],
+            'prioridad'   => ['nullable', 'in:Baja,Media,Alta,Crítica'],
+        ]);
+
+        $actor       = $request->user();
+        $oldAsignado = $ticket->asignado_id;
+
+        $ticket->asignado_id = $data['asignado_id'] ?? null;
+        $ticket->estado      = $data['estado'];
+        $ticket->categoria   = $data['categoria'] ?? $ticket->categoria;
+        $ticket->prioridad   = $data['prioridad'] ?? $ticket->prioridad;
+
+        if ($ticket->estado === 'Resuelto' && ! $ticket->resuelto_en) {
+            $ticket->resuelto_en = now();
+        }
+
+        $ticket->save();
+
+        if ($oldAsignado !== $ticket->asignado_id) {
+            $this->notifyTicketAssigned($ticket, $actor);
+        }
+
+        $this->notifyTicketUpdated($ticket, $actor);
+
+        event(new \App\Events\TicketUpdated($ticket, 'updated'));
+
+        return back()->with('ok', 'Gestión del ticket actualizada.');
+    }
+
+    // ==========================
+    // COMENTARIOS
+    // ==========================
+    public function comentar(Request $request, Ticket $ticket)
     {
         $this->authorize('comment', $ticket);
 
-        $validated = $request->validate([
-            'comentario' => ['required', 'string', 'max:5000'],
+        $data = $request->validate([
+            'comentario' => ['required', 'string'],
             'visibility' => ['required', 'in:publico,interno'],
         ]);
 
+        $actor = $request->user();
+
+        if (! $actor->hasAnyRole(['Administrador', 'Encargado de departamento', 'Rector'])) {
+            $data['visibility'] = 'publico';
+        }
+
         TicketComment::create([
             'ticket_id'  => $ticket->id,
-            'user_id'    => $request->user()->id,
-            'comentario' => $validated['comentario'],
-            'visibility' => $validated['visibility'],
+            'user_id'    => $actor->id,
+            'comentario' => $data['comentario'],
+            'visibility' => $data['visibility'],
         ]);
 
-        $notify->onTicketUpdated($ticket, $request->user());
+        $this->notifyTicketUpdated($ticket, $actor);
 
-        return back()->with('success', 'Comentario agregado.');
+        event(new \App\Events\TicketUpdated($ticket, 'commented'));
+
+        return back()->with('ok', 'Comentario agregado.');
     }
 
-    // --- Helpers ---
-
-    protected function saveAttachmentsFromRequest(Request $request, Ticket $ticket): void
+    // ==========================
+    // ADJUNTOS
+    // ==========================
+    public function uploadAttachment(Request $request, Ticket $ticket)
     {
-        $files = [];
+        $this->authorize('update', $ticket);
 
-        if ($request->hasFile('adjuntos')) {
-            $files = array_merge($files, $request->file('adjuntos'));
+        $request->validate([
+            'adjuntos.*' => ['file', 'max:5120'],
+        ]);
+
+        $this->handleAttachmentsUpload($request, $ticket);
+
+        $this->notifyTicketUpdated($ticket, $request->user());
+
+        event(new \App\Events\TicketUpdated($ticket, 'attachment_changed'));
+
+        return back()->with('ok', 'Adjunto(s) agregado(s).');
+    }
+
+    public function deleteAttachment(Request $request, Ticket $ticket, TicketAttachment $attachment)
+    {
+        $this->authorize('update', $ticket);
+
+        if ($attachment->ticket_id !== $ticket->id) {
+            abort(404);
         }
 
-        if ($request->hasFile('imagenes')) {
-            $files = array_merge($files, $request->file('imagenes'));
+        if ($attachment->path && Storage::disk('public')->exists($attachment->path)) {
+            Storage::disk('public')->delete($attachment->path);
         }
 
-        foreach ($files as $file) {
-            // Usar disco 'public' para que funcione asset('storage/...') en la vista
+        $attachment->delete();
+
+        $this->notifyTicketUpdated($ticket, $request->user());
+
+        event(new \App\Events\TicketUpdated($ticket, 'attachment_changed'));
+
+        return back()->with('ok', 'Adjunto eliminado.');
+    }
+
+    // ==========================
+    // ELIMINAR
+    // ==========================
+    public function destroy(Ticket $ticket)
+    {
+        $this->authorize('delete', $ticket);
+
+        foreach ($ticket->attachments as $a) {
+            if ($a->path && Storage::disk('public')->exists($a->path)) {
+                Storage::disk('public')->delete($a->path);
+            }
+            $a->delete();
+        }
+
+        $ticket->delete();
+
+        event(new \App\Events\TicketUpdated($ticket, 'deleted'));
+
+        return redirect()
+            ->route('tickets.index')
+            ->with('ok', 'Ticket eliminado.');
+    }
+
+    // ==========================
+    // HELPERS PRIVADOS
+    // ==========================
+
+    private function handleAttachmentsUpload(Request $request, Ticket $ticket): void
+    {
+        if (! $request->hasFile('adjuntos')) {
+            return;
+        }
+
+        foreach ($request->file('adjuntos') as $file) {
+            if (! $file->isValid()) {
+                continue;
+            }
+
             $path = $file->store("tickets/{$ticket->id}", 'public');
 
             TicketAttachment::create([
@@ -317,46 +449,84 @@ class TicketController extends Controller
         }
     }
 
-    // --- Adjuntar desde la vista show ---
-
-    public function uploadAttachment(Request $request, Ticket $ticket)
+    private function notifyNewTicketForDepartment(Ticket $ticket): void
     {
-        // Solo el solicitante puede adjuntar desde la vista show
-        abort_unless(auth()->id() === $ticket->usuario_id, 403);
-
-        $request->validate([
-            'imagen' => ['required', 'image', 'max:5120'], // 5MB
-        ]);
-
-        $file = $request->file('imagen');
-
-        $path = $file->store("tickets/{$ticket->id}", 'public');
-
-        TicketAttachment::create([
-            'ticket_id'       => $ticket->id,
-            'user_id'         => $request->user()->id,
-            'path'            => $path,
-            'nombre_original' => $file->getClientOriginalName(),
-            'mime_type'       => $file->getClientMimeType(),
-            'size'            => $file->getSize(),
-            'visibility'      => 'publico',
-        ]);
-
-        return back()->with('success', 'Imagen adjuntada correctamente.');
-    }
-
-    public function deleteAttachment(Ticket $ticket, TicketAttachment $attachment)
-    {
-        $this->authorize('update', $ticket);
-
-        // Seguridad: el adjunto debe pertenecer a este ticket
-        if ($attachment->ticket_id !== $ticket->id) {
-            abort(404);
+        if (! $ticket->departamento_id) {
+            return;
         }
 
-        Storage::disk('public')->delete($attachment->path);
-        $attachment->delete();
+        $users = User::query()
+            ->where('department_id', $ticket->departamento_id)
+            ->get();
 
-        return back()->with('success', 'Adjunto eliminado.');
+        if ($users->isEmpty()) {
+            return;
+        }
+
+        Notification::send($users, new NewTicketForDepartmentNotification($ticket));
+        $this->pushNotifBellForUsers($users);
+    }
+
+    private function notifyTicketAssigned(Ticket $ticket, ?User $actor = null): void
+    {
+        if (! $ticket->asignado_id) {
+            return;
+        }
+
+        $assignee = User::find($ticket->asignado_id);
+
+        if (! $assignee) {
+            return;
+        }
+
+        if ($actor && $actor->id === $assignee->id) {
+            return;
+        }
+
+        $assignee->notify(new TicketAssignedNotification($ticket));
+        $this->pushNotifBellForUsers(collect([$assignee]));
+    }
+
+    private function notifyTicketUpdated(Ticket $ticket, ?User $actor = null): void
+    {
+        $recipients = collect([
+            User::find($ticket->usuario_id),
+            $ticket->asignado_id ? User::find($ticket->asignado_id) : null,
+        ])->filter()->unique('id');
+
+        if ($actor) {
+            $recipients = $recipients->reject(fn($u) => $u->id === $actor->id);
+        }
+
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        Notification::send($recipients, new TicketUpdatedNotification($ticket));
+        $this->pushNotifBellForUsers($recipients);
+    }
+
+    private function pushNotifBellForUsers($users): void
+    {
+        foreach ($users as $u) {
+            $count = $u->unreadNotifications()->count();
+
+            $latest = $u->unreadNotifications()
+                ->latest()
+                ->limit(5)
+                ->get()
+                ->map(function ($n) {
+                    return [
+                        'id'    => $n->id,
+                        'title' => data_get($n->data, 'title', 'Notificación'),
+                        'body'  => data_get($n->data, 'body', ''),
+                        'url'   => route('notifications.go', $n->id),
+                    ];
+                })
+                ->values()
+                ->all();
+
+            event(new \App\Events\UserNotificationPushed($u->id, $count, $latest));
+        }
     }
 }

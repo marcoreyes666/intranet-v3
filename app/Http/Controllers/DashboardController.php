@@ -3,9 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Event;
-use App\Models\User;
+use App\Models\Ticket;
+use App\Models\RequestForm;
+use App\Services\BirthdayService;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
+use App\Models\Announcement;
+use App\Models\AnnouncementRead;
 
 class DashboardController extends Controller
 {
@@ -14,17 +17,34 @@ class DashboardController extends Controller
         $this->middleware(['auth']);
     }
 
-    public function index()
+    public function index(BirthdayService $birthdayService)
     {
-        $now = Carbon::now();
-        $to  = $now->copy()->addDays(10);
+        $now  = Carbon::now();
+        $to   = $now->copy()->addDays(10);
+        $user = auth()->user();
 
-        // Eventos reales → colección BASE (no Eloquent) para poder hacer merge sin errores
-        $events = Event::query()
+        /*
+        |--------------------------------------------------------------------------
+        | Próximos eventos + cumpleaños
+        |--------------------------------------------------------------------------
+        */
+        $eventsQuery = Event::query()
             ->where('start', '<', $to)
             ->where(function ($q) use ($now) {
                 $q->whereNull('end')->orWhere('end', '>=', $now);
-            })
+            });
+
+        if (! $user->hasAnyRole(['Administrador', 'Sistemas'])) {
+            $eventsQuery->where(function ($q) use ($user) {
+                $q->where('is_sound_only', false)
+                  ->orWhere(function ($q2) use ($user) {
+                      $q2->where('is_sound_only', true)
+                         ->where('created_by', $user->id);
+                  });
+            });
+        }
+
+        $events = $eventsQuery
             ->orderBy('start')
             ->get(['title', 'start', 'end', 'all_day', 'location'])
             ->map(function ($e) {
@@ -38,74 +58,127 @@ class DashboardController extends Controller
                 ];
             })
             ->values()
-            ->toBase(); // <-- clave: convierte a Illuminate\Support\Collection
+            ->toBase();
 
-        // Cumpleaños (colección base de arrays)
-        $birthdays = $this->birthdayItems($now, $to);
+        $birthdays = $birthdayService
+            ->eventsInRange($now, $to)
+            ->map(function ($item) {
+                return [
+                    'type'     => 'birthday',
+                    'title'    => "🎂 Cumple: {$item['name']}",
+                    'name'     => $item['name'],
+                    'start'    => $item['date']->copy()->startOfDay(),
+                    'end'      => null,
+                    'all_day'  => true,
+                    'location' => null,
+                ];
+            });
 
-        // Unir, ordenar y limitar
         $upcoming = $events->merge($birthdays)
             ->sortBy(fn ($i) => $i['start'])
             ->take(15)
             ->values();
 
-        return view('dashboard', compact('upcoming'));
-    }
+        /*
+        |--------------------------------------------------------------------------
+        | Estadísticas de tickets
+        |--------------------------------------------------------------------------
+        */
+        $statsTickets = [
+            'open' => Ticket::visibleTo($user)
+                ->whereIn('estado', ['Abierto', 'En proceso'])
+                ->count(),
 
-    /**
-     * Cumpleaños entre $start (incl.) y $end (excl.)
-     * Devuelve Illuminate\Support\Collection de arrays.
-     */
-    private function birthdayItems(Carbon $start, Carbon $end)
-    {
-        // Meses en el rango
-        $months = [];
-        $cursor = $start->copy()->startOfDay();
-        while ($cursor->lt($end)) {
-            $m = (int) $cursor->format('n');
-            if (!in_array($m, $months, true)) $months[] = $m;
-            $cursor->addDay();
-        }
+            'mine' => Ticket::where('usuario_id', $user->id)->count(),
 
-        // Años cubiertos (sin duplicados)
-        $endInclusive = $end->copy()->subSecond();
-        $years = range($start->year, $endInclusive->year);
+            'assigned' => Ticket::where('asignado_id', $user->id)
+                ->whereIn('estado', ['Abierto', 'En proceso'])
+                ->count(),
+        ];
 
-        $users = User::select('id', 'name', 'birth_date')
-            ->whereNotNull('birth_date')
-            ->whereIn(DB::raw('MONTH(birth_date)'), $months)
+        $myRecentTickets = Ticket::visibleTo($user)
+            ->with(['departamento'])
+            ->orderByDesc('id')
+            ->limit(5)
             ->get();
 
-        $items = [];
-        $seen  = [];
+        /*
+        |--------------------------------------------------------------------------
+        | Solicitudes
+        |--------------------------------------------------------------------------
+        */
+        $pendingToApprove = 0;
+        $myRequests       = collect();
 
-        foreach ($users as $u) {
-            $month = (int) $u->birth_date->format('n');
-            $day   = (int) $u->birth_date->format('j');
+        if (class_exists(RequestForm::class)) {
+            $myRequests = RequestForm::query()
+                ->with(['department'])
+                ->where('user_id', $user->id)
+                ->latest()
+                ->limit(5)
+                ->get();
 
-            foreach ($years as $year) {
-                $lastDay = Carbon::create($year, $month, 1)->endOfMonth()->day;
-                $safeDay = min($day, $lastDay);
-                $d = Carbon::create($year, $month, $safeDay);
+            $isApprover = $user->hasAnyRole([
+                'Rector',
+                'Compras',
+                'Contabilidad',
+                'Encargado de departamento',
+            ]);
 
-                if ($d->gte($start) && $d->lt($end)) {
-                    $key = $u->id . '|' . $d->toDateString();
-                    if (isset($seen[$key])) continue; // de-dup
-                    $seen[$key] = true;
-
-                    $items[] = [
-                        'type'     => 'birthday',
-                        'title'    => "🎂 Cumple: {$u->name}",
-                        'name'     => $u->name,
-                        'start'    => $d->copy()->startOfDay(),
-                        'end'      => null,
-                        'all_day'  => true,
-                        'location' => null,
-                    ];
-                }
+            if ($isApprover) {
+                $pendingToApprove = RequestForm::query()
+                    ->where('status', 'en_revision')
+                    ->whereHas('approvals', function ($q) use ($user) {
+                        $q->where('state', 'pendiente')
+                          ->where(function ($q2) use ($user) {
+                              if ($user->hasRole('Rector')) {
+                                  $q2->orWhere('role', 'Rector');
+                              }
+                              if ($user->hasRole('Compras')) {
+                                  $q2->orWhere('role', 'Compras');
+                              }
+                              if ($user->hasRole('Contabilidad')) {
+                                  $q2->orWhere('role', 'Contabilidad');
+                              }
+                              if ($user->hasRole('Encargado de departamento')) {
+                                  $q2->orWhere('role', 'Encargado');
+                              }
+                          });
+                    })
+                    ->count();
             }
         }
 
-        return collect($items);
+        /*
+        |--------------------------------------------------------------------------
+        | Notificaciones
+        |--------------------------------------------------------------------------
+        */
+        $unreadNotifications = $user->unreadNotifications()->count();
+
+        /*
+        |--------------------------------------------------------------------------
+        | Avisos institucionales (para el dashboard)
+        |--------------------------------------------------------------------------
+        */
+        $announcementItems = Announcement::visibleTo($user)
+            ->orderByDesc('is_pinned')
+            ->latest()
+            ->limit(5)
+            ->get();
+
+        $announcementReads = AnnouncementRead::where('user_id', $user->id)
+            ->pluck('read_at', 'announcement_id');
+
+        return view('dashboard', compact(
+            'upcoming',
+            'statsTickets',
+            'myRecentTickets',
+            'pendingToApprove',
+            'myRequests',
+            'unreadNotifications',
+            'announcementItems',
+            'announcementReads'
+        ));
     }
 }
